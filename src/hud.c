@@ -142,7 +142,7 @@ static void draw_attitude(float cx, float cy, float radius, float roll_deg, floa
     int pitch_marks[] = {-20, -10, 10, 20};
     for (int p = 0; p < 4; p++) {
         float py = pitch_marks[p] * (radius * 0.6f / 40.0f);
-        float bar_w = (abs(pitch_marks[p]) == 20) ? radius * 0.3f : radius * 0.2f;
+        float bar_w = (pitch_marks[p] == 20 || pitch_marks[p] == -20) ? radius * 0.3f : radius * 0.2f;
         float bx1 = cx + (-bar_w) * cos_r - (pitch_px - py) * sin_r;
         float by1 = cy + (-bar_w) * sin_r + (pitch_px - py) * cos_r;
         float bx2 = cx + ( bar_w) * cos_r - (pitch_px - py) * sin_r;
