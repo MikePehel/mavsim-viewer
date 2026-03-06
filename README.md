@@ -66,6 +66,10 @@ make px4_sitl sihsim_quadx
 | Left-drag | Orbit camera (chase mode) |
 | Scroll wheel | Zoom FOV |
 
+## Acknowledgments
+
+This project was inspired by [jMAVSim](https://github.com/PX4/jMAVSim), the Java-based MAVLink simulator and viewer. Vehicle 3D models and sky/ground textures are derived from jMAVSim's assets.
+
 ## License
 
 BSD-3-Clause
