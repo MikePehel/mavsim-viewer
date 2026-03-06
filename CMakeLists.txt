@@ -38,6 +38,8 @@ if(APPLE)
         "-framework Cocoa"
         "-framework OpenGL"
     )
+elseif(WIN32)
+    target_link_libraries(mavsim-viewer PRIVATE ws2_32)
 elseif(UNIX)
     target_link_libraries(mavsim-viewer PRIVATE m pthread dl)
 endif()

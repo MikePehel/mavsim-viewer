@@ -4,6 +4,14 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#ifdef _WIN32
+typedef uintptr_t sock_t;
+#define SOCK_INVALID (~(sock_t)0)
+#else
+typedef int sock_t;
+#define SOCK_INVALID (-1)
+#endif
+
 typedef struct {
     float quaternion[4]; // w, x, y, z
     int32_t lat;         // degE7
@@ -16,7 +24,7 @@ typedef struct {
 } hil_state_t;
 
 typedef struct {
-    int sockfd;
+    sock_t sockfd;
     uint16_t port;
     bool connected;
     bool debug;
