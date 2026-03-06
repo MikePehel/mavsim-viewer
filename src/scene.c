@@ -1,0 +1,149 @@
+#include "scene.h"
+#include "raymath.h"
+#include "rlgl.h"
+#include <stdio.h>
+#include <math.h>
+
+#define GROUND_SIZE 5000.0f   // half-size in meters (10km total, matching jMAVSim)
+#define GROUND_TILES 100.0f   // texture repeat count
+#define SKY_RADIUS 6000.0f    // sky sphere radius (larger than ground diagonal)
+
+void scene_init(scene_t *s) {
+    s->cam_mode = CAM_MODE_CHASE;
+    s->chase_distance = 3.0f;
+    s->chase_yaw = 0.0f;
+    s->chase_pitch = 0.4f;  // ~23° above horizontal
+
+    // Camera
+    s->camera = (Camera3D){
+        .position = (Vector3){0.0f, 5.0f, 10.0f},
+        .target   = (Vector3){0.0f, 0.0f, 0.0f},
+        .up       = (Vector3){0.0f, 1.0f, 0.0f},
+        .fovy     = 60.0f,
+        .projection = CAMERA_PERSPECTIVE,
+    };
+
+    // Ground plane mesh
+    Mesh ground_mesh = GenMeshPlane(GROUND_SIZE * 2, GROUND_SIZE * 2, 1, 1);
+    s->ground = LoadModelFromMesh(ground_mesh);
+
+    // Ground texture
+    Image grass_img = LoadImage("textures/grass3.jpg");
+    if (grass_img.data != NULL) {
+        s->ground_tex = LoadTextureFromImage(grass_img);
+        SetTextureFilter(s->ground_tex, TEXTURE_FILTER_TRILINEAR);
+        SetTextureWrap(s->ground_tex, TEXTURE_WRAP_REPEAT);
+        UnloadImage(grass_img);
+
+        s->ground.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = s->ground_tex;
+
+        // Scale UVs for tiling
+        Mesh *m = &s->ground.meshes[0];
+        for (int i = 0; i < m->vertexCount; i++) {
+            m->texcoords[i * 2 + 0] *= GROUND_TILES;
+            m->texcoords[i * 2 + 1] *= GROUND_TILES;
+        }
+        UpdateMeshBuffer(*m, 1, m->texcoords, m->vertexCount * 2 * sizeof(float), 0);
+    }
+
+    // Sky sphere — we draw from inside with backface culling disabled
+    Mesh sky_mesh = GenMeshSphere(SKY_RADIUS, 36, 36);
+    s->sky_sphere = LoadModelFromMesh(sky_mesh);
+
+    // Sky texture
+    Image sky_img = LoadImage("textures/HDR_040_Field_Bg.jpg");
+    if (sky_img.data != NULL) {
+        s->sky_tex = LoadTextureFromImage(sky_img);
+        SetTextureFilter(s->sky_tex, TEXTURE_FILTER_BILINEAR);
+        UnloadImage(sky_img);
+
+        s->sky_sphere.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = s->sky_tex;
+    }
+}
+
+static void update_chase_camera(scene_t *s, Vector3 pos) {
+    float dist = s->chase_distance;
+
+    // Spherical coordinates around the target
+    float cam_x = pos.x + dist * cosf(s->chase_pitch) * sinf(s->chase_yaw);
+    float cam_y = pos.y + dist * sinf(s->chase_pitch);
+    float cam_z = pos.z + dist * cosf(s->chase_pitch) * cosf(s->chase_yaw);
+
+    s->camera.target = pos;
+    s->camera.position = (Vector3){cam_x, cam_y, cam_z};
+    s->camera.up = (Vector3){0, 1, 0};
+}
+
+static void update_fpv_camera(scene_t *s, Vector3 pos, Quaternion rot) {
+    s->camera.position = pos;
+    Vector3 forward = Vector3RotateByQuaternion((Vector3){0, 0, -1}, rot);
+    s->camera.target = Vector3Add(pos, forward);
+    Vector3 up = Vector3RotateByQuaternion((Vector3){0, 1, 0}, rot);
+    s->camera.up = up;
+}
+
+void scene_update_camera(scene_t *s, Vector3 vehicle_pos, Quaternion vehicle_rot) {
+    switch (s->cam_mode) {
+        case CAM_MODE_CHASE:
+            update_chase_camera(s, vehicle_pos);
+            break;
+        case CAM_MODE_FPV:
+            update_fpv_camera(s, vehicle_pos, vehicle_rot);
+            break;
+        default:
+            break;
+    }
+}
+
+void scene_handle_input(scene_t *s) {
+    if (IsKeyPressed(KEY_C)) {
+        s->cam_mode = (s->cam_mode + 1) % CAM_MODE_COUNT;
+        const char *names[] = {"Chase", "FPV"};
+        printf("Camera: %s\n", names[s->cam_mode]);
+
+        s->camera.up = (Vector3){0, 1, 0};
+    }
+
+    // Mouse drag to orbit (left button)
+    if (s->cam_mode == CAM_MODE_CHASE && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        Vector2 delta = GetMouseDelta();
+        s->chase_yaw   -= delta.x * 0.005f;
+        s->chase_pitch += delta.y * 0.005f;
+
+        // Clamp pitch to avoid flipping
+        if (s->chase_pitch < -1.2f) s->chase_pitch = -1.2f;
+        if (s->chase_pitch > 1.4f) s->chase_pitch = 1.4f;
+    }
+
+    // Scroll wheel FOV zoom
+    float wheel = GetMouseWheelMove();
+    if (wheel != 0.0f) {
+        s->camera.fovy -= wheel * 5.0f;
+        if (s->camera.fovy < 10.0f) s->camera.fovy = 10.0f;
+        if (s->camera.fovy > 120.0f) s->camera.fovy = 120.0f;
+    }
+}
+
+void scene_draw(const scene_t *s) {
+    // Sky sphere centered on camera — disable culling so we see it from inside
+    rlDisableBackfaceCulling();
+    DrawModel(s->sky_sphere, s->camera.position, 1.0f, WHITE);
+    rlEnableBackfaceCulling();
+
+    // Ground
+    DrawModel(s->ground, (Vector3){0, 0, 0}, 1.0f, WHITE);
+
+    // Reference grid
+    DrawGrid(100, 10.0f);
+}
+
+void scene_draw_sky(const scene_t *s) {
+    ClearBackground((Color){135, 206, 235, 255});
+}
+
+void scene_cleanup(scene_t *s) {
+    UnloadModel(s->ground);
+    UnloadModel(s->sky_sphere);
+    if (s->ground_tex.id > 0) UnloadTexture(s->ground_tex);
+    if (s->sky_tex.id > 0) UnloadTexture(s->sky_tex);
+}

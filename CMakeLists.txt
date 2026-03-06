@@ -1,0 +1,51 @@
+cmake_minimum_required(VERSION 3.14)
+project(mavsim-viewer C)
+
+set(CMAKE_C_STANDARD 11)
+
+# Raylib via FetchContent
+include(FetchContent)
+FetchContent_Declare(
+    raylib
+    GIT_REPOSITORY https://github.com/raysan5/raylib.git
+    GIT_TAG        5.5
+    GIT_SHALLOW    TRUE
+)
+set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(raylib)
+
+# MAVLink c_library_v2 (header-only, submodule)
+set(MAVLINK_DIR ${CMAKE_SOURCE_DIR}/lib/c_library_v2)
+
+add_executable(mavsim-viewer
+    src/main.c
+    src/mavlink_receiver.c
+    src/vehicle.c
+    src/scene.c
+    src/hud.c
+)
+
+target_include_directories(mavsim-viewer PRIVATE
+    ${MAVLINK_DIR}
+    ${MAVLINK_DIR}/common
+)
+
+target_link_libraries(mavsim-viewer PRIVATE raylib)
+
+if(APPLE)
+    target_link_libraries(mavsim-viewer PRIVATE
+        "-framework IOKit"
+        "-framework Cocoa"
+        "-framework OpenGL"
+    )
+elseif(UNIX)
+    target_link_libraries(mavsim-viewer PRIVATE m pthread dl)
+endif()
+
+# Copy resources to build directory
+add_custom_command(TARGET mavsim-viewer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/models $<TARGET_FILE_DIR:mavsim-viewer>/models
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/textures $<TARGET_FILE_DIR:mavsim-viewer>/textures
+)
