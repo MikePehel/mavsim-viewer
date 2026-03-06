@@ -70,7 +70,6 @@ static void draw_compass(float cx, float cy, float radius, float heading_deg) {
 
 void hud_draw(const hud_t *h, const vehicle_t *v, bool connected, int screen_w, int screen_h,
               int vehicle_idx, int vehicle_total, uint8_t sysid) {
-    (void)connected; // handled in second row below
 
     // Vehicle tab header (above the bottom bar, only for multi-vehicle)
     int tab_h = 0;
@@ -205,10 +204,16 @@ void hud_draw(const hud_t *h, const vehicle_t *v, bool connected, int screen_w, 
         int fps_x = screen_w - 70;
         DrawText(b, fps_x, row2_y, 11, (Color){100, 100, 100, 255});
 
-        if (!connected) {
-            const char *msg = "Waiting for MAVLink...";
-            int msg_w = MeasureText(msg, 11);
-            DrawText(msg, fps_x - msg_w - 15, row2_y, 11, RED);
+        {
+            char status_buf[32];
+            if (connected) {
+                snprintf(status_buf, sizeof(status_buf), "MAVLink SYS %u", sysid);
+            } else {
+                snprintf(status_buf, sizeof(status_buf), "Waiting for MAVLink...");
+            }
+            Color status_color = connected ? (Color){100, 200, 100, 255} : WHITE;
+            int msg_w = MeasureText(status_buf, 11);
+            DrawText(status_buf, fps_x - msg_w - 15, row2_y, 11, status_color);
         }
     }
 }
