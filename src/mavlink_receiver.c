@@ -2,31 +2,55 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
+
+#ifdef _WIN32
+#include <ws2tcpip.h>
+#define SOCK_CLOSE(s) closesocket(s)
+#else
 #include <unistd.h>
 #include <fcntl.h>
-#include <errno.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#define SOCK_CLOSE(s) close(s)
+#endif
 
 // MAVLink config: use common message set
 #include <mavlink.h>
+
+static int set_nonblocking(sock_t s) {
+#ifdef _WIN32
+    u_long mode = 1;
+    return ioctlsocket(s, FIONBIO, &mode);
+#else
+    int flags = fcntl(s, F_GETFL, 0);
+    return fcntl(s, F_SETFL, flags | O_NONBLOCK);
+#endif
+}
 
 int mavlink_receiver_init(mavlink_receiver_t *recv, uint16_t port) {
     bool debug = recv->debug;
     memset(recv, 0, sizeof(*recv));
     recv->debug = debug;
     recv->port = port;
+    recv->sockfd = SOCK_INVALID;
+
+#ifdef _WIN32
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        fprintf(stderr, "WSAStartup failed: %d\n", WSAGetLastError());
+        return -1;
+    }
+#endif
 
     recv->sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (recv->sockfd < 0) {
+    if (recv->sockfd == SOCK_INVALID) {
         perror("socket");
         return -1;
     }
 
-    // Set non-blocking
-    int flags = fcntl(recv->sockfd, F_GETFL, 0);
-    fcntl(recv->sockfd, F_SETFL, flags | O_NONBLOCK);
+    set_nonblocking(recv->sockfd);
 
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
@@ -36,7 +60,8 @@ int mavlink_receiver_init(mavlink_receiver_t *recv, uint16_t port) {
 
     if (bind(recv->sockfd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         perror("bind");
-        close(recv->sockfd);
+        SOCK_CLOSE(recv->sockfd);
+        recv->sockfd = SOCK_INVALID;
         return -1;
     }
 
@@ -50,14 +75,14 @@ void mavlink_receiver_poll(mavlink_receiver_t *recv) {
     socklen_t sender_len = sizeof(sender);
 
     for (;;) {
-        ssize_t n = recvfrom(recv->sockfd, buf, sizeof(buf), 0,
-                             (struct sockaddr *)&sender, &sender_len);
+        int n = recvfrom(recv->sockfd, (char *)buf, sizeof(buf), 0,
+                         (struct sockaddr *)&sender, &sender_len);
         if (n <= 0) break;
 
         mavlink_message_t msg;
         mavlink_status_t status;
 
-        for (ssize_t i = 0; i < n; i++) {
+        for (int i = 0; i < n; i++) {
             if (mavlink_parse_char(MAVLINK_COMM_0, buf[i], &msg, &status)) {
                 if (recv->debug) {
                     printf("[MAVLink] msgid=%u sysid=%u compid=%u seq=%u len=%u\n",
@@ -106,8 +131,11 @@ void mavlink_receiver_poll(mavlink_receiver_t *recv) {
 }
 
 void mavlink_receiver_close(mavlink_receiver_t *recv) {
-    if (recv->sockfd >= 0) {
-        close(recv->sockfd);
-        recv->sockfd = -1;
+    if (recv->sockfd != SOCK_INVALID) {
+        SOCK_CLOSE(recv->sockfd);
+        recv->sockfd = SOCK_INVALID;
     }
+#ifdef _WIN32
+    WSACleanup();
+#endif
 }

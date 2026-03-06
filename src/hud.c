@@ -1,6 +1,11 @@
 #include "hud.h"
 #include "raylib.h"
 #include "raymath.h"
+
+#ifdef _WIN32
+// windows.h defines DrawText as DrawTextA, conflicting with raylib
+#undef DrawText
+#endif
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
