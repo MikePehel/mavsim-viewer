@@ -41,16 +41,18 @@ typedef struct {
     int trail_head;
     int trail_capacity;
     float trail_timer;
+    Shader lighting_shader;  // shared lighting shader (id=0 if none)
+    int loc_matNormal;       // shader uniform for normal matrix
 } vehicle_t;
 
-// Load vehicle model. type selects which OBJ to load.
-void vehicle_init(vehicle_t *v, vehicle_type_t type);
+// Load vehicle model. type selects which OBJ to load. shader is optional lighting shader (id=0 to skip).
+void vehicle_init(vehicle_t *v, vehicle_type_t type, Shader lighting_shader);
 
 // Update position/rotation from HIL_STATE_QUATERNION data.
 void vehicle_update(vehicle_t *v, const hil_state_t *state);
 
 // Draw the vehicle model. Pass view mode for per-mode coloring and selected state.
-void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected);
+void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected, bool show_trails);
 
 // Unload model resources.
 void vehicle_cleanup(vehicle_t *v);

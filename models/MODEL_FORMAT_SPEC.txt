@@ -1,0 +1,153 @@
+MAVSim Viewer — OBJ Model Format Specification
+================================================
+
+Any .obj model added or replaced in models/ must follow these rules
+to load and render correctly in the viewer.
+
+
+1. FILE STRUCTURE
+-----------------
+Each model consists of two files:
+  models/<name>.obj    Wavefront OBJ geometry
+  models/<name>.mtl    Wavefront MTL materials
+
+The OBJ must reference its MTL with:
+  mtllib <name>.mtl
+
+Both files must be plain ASCII text (no binary OBJ).
+
+
+2. FACE FORMAT
+--------------
+Faces MUST include vertex normal references. Bare vertex indices crash
+Raylib's tinyobj loader.
+
+  GOOD:   f 1//1 2//2 3//3          (vertex//normal, triangles)
+          f 1//1 2//1 3//1 4//1      (vertex//normal, quads — auto-triangulated)
+
+  BAD:    f 1 2 3                    (bare vertices — will segfault)
+          f 1/1/1 2/2/2 3/3/3        (vertex/texcoord/normal — untested, avoid)
+
+Texture coordinates (vt) are not used. The viewer has no texture mapping;
+all coloring comes from material diffuse colors.
+
+
+3. GEOMETRY ORIENTATION & SCALE
+-------------------------------
+Models are authored in Z-up space:
+  - X/Y axes define the horizontal plane of the vehicle
+  - Z axis points up through the top of the vehicle (+Z = up)
+  - The vehicle nose points along +X (forward)
+
+CRITICAL: The top of the vehicle (props, canopy) must have POSITIVE Z
+values, and the bottom (legs, belly) must have NEGATIVE or near-zero Z.
+If the model is Z-down (bulk of geometry at negative Z), the vehicle
+will render upside-down AND normals will face away from the light,
+making the model appear dark/colorless. To fix a Z-down model, negate
+the Z component of all vertex (v) and normal (vn) lines.
+
+Vertex normals (vn) must point OUTWARD from the vehicle surface. If
+normals point inward, the lighting shader will compute dot(N, L) <= 0
+for all lit faces, resulting in ambient-only (very dim) rendering.
+
+At load time, the viewer applies:
+  1. +90 deg rotation around X to convert Z-up to Raylib Y-up
+  2. A per-vehicle-type yaw correction (model_yaw_offset_deg[]) to
+     align the nose with -Z (Raylib forward/North)
+
+If your model's nose points along +X in OBJ space, set yaw offset to 0.
+If it points along +Y, set yaw offset to 90, etc. Edit vehicle.c:
+
+  static const float model_yaw_offset_deg[] = {
+      [VEHICLE_MULTICOPTER] = 0.0f,
+      [VEHICLE_FIXEDWING]   = 90.0f,
+      [VEHICLE_TAILSITTER]  = 0.0f,
+  };
+
+Scale: the existing models are real-world scale in meters (arm length
+~0.2m, total span ~0.5m). The model_scales[] array in vehicle.c
+defaults to 1.0 for all types. Adjust if your model uses different
+units.
+
+
+4. MATERIALS & COLOR REMAPPING
+------------------------------
+The viewer does NOT use material names. It detects material roles by
+inspecting each material's diffuse color (Kd) at load time, using
+these heuristic ranges (values are 0-255 after Raylib converts Kd):
+
+  ROLE             DETECTION RULE                        REMAPPED TO
+  ----             --------------                        ----------
+  Blue accent      B > 100 AND R < 50                    #272fc5
+  Red accent       R > 100 AND G < 50 AND B < 50         #ff2f2b
+  Mid-tone grey    R 60-180 AND G 60-180 AND B > 60      #5075a2
+  Dark body        R < 40 AND G < 40 AND B < 55          #0e1f2f
+
+The "Red accent" material is also tracked for per-view-mode color
+swaps (orange in Rez mode, hot pink in 1988 mode).
+
+To convert Kd float values to the 0-255 range for checking:
+  Kd 0.80 0.13 0.13  -->  R=204 G=33 B=33  -->  matches "Red accent"
+  Kd 0.10 0.23 0.80  -->  R=26  G=58 B=204 -->  matches "Blue accent"
+
+Materials that don't match any rule keep their original MTL color.
+
+
+5. RECOMMENDED MATERIAL PALETTE
+--------------------------------
+For best results, define materials with Kd values that land cleanly
+in the detection ranges above:
+
+  newmtl Body_Dark
+  Kd 0.05 0.07 0.09          # Near-black body panels
+
+  newmtl Red_Metal
+  Kd 0.80 0.13 0.13          # Red arms (front-left / back-right)
+
+  newmtl Blue_Metal
+  Kd 0.10 0.23 0.80          # Blue arms (front-right / back-left)
+
+  newmtl Prop_Grey
+  Kd 0.30 0.40 0.53          # Propellers / mid-tone parts
+
+You can use more materials (motors, legs, etc.) — just keep their Kd
+values within one of the four detection ranges.
+
+
+6. GROUP STRUCTURE
+------------------
+Each distinct part should be a separate group (g) with its own usemtl:
+
+  g arm_front_left
+  usemtl Red_Metal
+  f ...
+
+  g arm_front_right
+  usemtl Blue_Metal
+  f ...
+
+There is no limit on group count, but more groups = more draw calls.
+The existing models use 25-35 groups without performance issues.
+
+
+7. WHAT NOT TO INCLUDE
+-----------------------
+- Texture coordinates (vt) — ignored, waste of file size
+- Texture map references (map_Kd, map_Ks, etc.) — not loaded
+- Smoothing groups (s) — ignored by the viewer's flat shading
+- Object lines (o) — use groups (g) instead
+- Lines or points (l, p) — only triangular/quad faces are rendered
+
+
+8. QUICK CHECKLIST
+------------------
+[ ] .obj and .mtl are both ASCII text files
+[ ] mtllib line in .obj matches .mtl filename
+[ ] All faces use f v//vn format (not bare v)
+[ ] Vertex normals (vn) are defined for all referenced indices
+[ ] No texture coordinates or texture maps
+[ ] Model is Z-up, nose along +X, real-world meter scale
+[ ] At least one material has Kd in the "red" range (R>0.39, G<0.20, B<0.20)
+[ ] At least one material has Kd in the "blue" range (B>0.39, R<0.20)
+[ ] Dark body materials have Kd below (0.16, 0.16, 0.22)
+[ ] Path is registered in vehicle.c model_paths[] array

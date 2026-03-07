@@ -53,6 +53,7 @@ int main(int argc, char *argv[]) {
     int win_w = 1280;
     int win_h = 720;
     bool debug = false;
+    bool fake = false;
     // PX4 SIH default spawn position
     double origin_lat = 47.397742;
     double origin_lon = 8.545594;
@@ -79,6 +80,8 @@ int main(int argc, char *argv[]) {
             vtype = VEHICLE_TAILSITTER;
         } else if (strcmp(argv[i], "-d") == 0) {
             debug = true;
+        } else if (strcmp(argv[i], "-fake") == 0) {
+            fake = true;
         } else if (strcmp(argv[i], "-w") == 0 && i + 1 < argc) {
             win_w = atoi(argv[++i]);
         } else if (strcmp(argv[i], "-h") == 0 && i + 1 < argc) {
@@ -97,19 +100,25 @@ int main(int argc, char *argv[]) {
     // Init MAVLink receivers
     mavlink_receiver_t receivers[MAX_VEHICLES];
     memset(receivers, 0, sizeof(receivers));
-    for (int i = 0; i < vehicle_count; i++) {
-        receivers[i].debug = debug;
-        if (mavlink_receiver_init(&receivers[i], base_port + i, (uint8_t)i) != 0) {
-            fprintf(stderr, "Failed to init MAVLink receiver on port %u\n", base_port + i);
-            CloseWindow();
-            return 1;
+    if (!fake) {
+        for (int i = 0; i < vehicle_count; i++) {
+            receivers[i].debug = debug;
+            if (mavlink_receiver_init(&receivers[i], base_port + i, (uint8_t)i) != 0) {
+                fprintf(stderr, "Failed to init MAVLink receiver on port %u\n", base_port + i);
+                CloseWindow();
+                return 1;
+            }
         }
     }
+
+    // Init scene first (provides lighting shader for vehicles)
+    scene_t scene;
+    scene_init(&scene);
 
     // Init vehicles
     vehicle_t vehicles[MAX_VEHICLES];
     for (int i = 0; i < vehicle_count; i++) {
-        vehicle_init(&vehicles[i], vtype);
+        vehicle_init(&vehicles[i], vtype, scene.lighting_shader);
         vehicles[i].color = vehicle_colors[i];
     }
 
@@ -126,22 +135,43 @@ int main(int argc, char *argv[]) {
         printf("NED origin: lat=%.6f lon=%.6f alt=%.1f\n", origin_lat, origin_lon, origin_alt);
     }
 
-    scene_t scene;
-    scene_init(&scene);
+    // Fake mode: place vehicles in a grid with dummy telemetry
+    if (fake) {
+        for (int i = 0; i < vehicle_count; i++) {
+            float row = (float)(i / 3);
+            float col = (float)(i % 3);
+            vehicles[i].position = (Vector3){ (col - 1.0f) * 5.0f, 2.0f + i * 0.5f, (row - 1.0f) * 5.0f };
+            vehicles[i].rotation = QuaternionIdentity();
+            vehicles[i].active = true;
+            vehicles[i].sysid = (uint8_t)(i + 1);
+            vehicles[i].heading_deg = (float)(i * 40);
+            vehicles[i].roll_deg = (float)(i * 3 - 12);
+            vehicles[i].pitch_deg = (float)(i * 2 - 8);
+            vehicles[i].ground_speed = 5.0f + i * 1.5f;
+            vehicles[i].vertical_speed = (i % 2 == 0) ? 1.5f : -0.8f;
+            vehicles[i].airspeed = 8.0f + i * 2.0f;
+            vehicles[i].altitude_rel = 10.0f + i * 5.0f;
+            receivers[i].connected = true;
+            receivers[i].sysid = (uint8_t)(i + 1);
+        }
+    }
 
     hud_t hud;
     hud_init(&hud);
 
     int selected = 0;
     bool show_hud = true;
+    bool show_trails = true;
 
     // Main loop
     while (!WindowShouldClose()) {
         // Poll all MAVLink receivers and update vehicles
-        for (int i = 0; i < vehicle_count; i++) {
-            mavlink_receiver_poll(&receivers[i]);
-            vehicle_update(&vehicles[i], &receivers[i].state);
-            vehicles[i].sysid = receivers[i].sysid;
+        if (!fake) {
+            for (int i = 0; i < vehicle_count; i++) {
+                mavlink_receiver_poll(&receivers[i]);
+                vehicle_update(&vehicles[i], &receivers[i].state);
+                vehicles[i].sysid = receivers[i].sysid;
+            }
         }
 
         // Check if any receiver is connected (for HUD)
@@ -155,6 +185,7 @@ int main(int argc, char *argv[]) {
                    receivers[selected].connected, GetFrameTime());
 
         // Handle input
+        if (IsKeyPressed(KEY_T)) show_trails = !show_trails;
         scene_handle_input(&scene);
 
         // Help overlay toggle (? key = Shift+/)
@@ -230,6 +261,59 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        // WASDQE movement for fake mode
+        if (fake) {
+            float spd = 5.0f * GetFrameTime();
+            vehicle_t *sv = &vehicles[selected];
+            float dx = 0, dy = 0, dz = 0;
+            if (IsKeyDown(KEY_W)) dz -= spd;
+            if (IsKeyDown(KEY_S)) dz += spd;
+            if (IsKeyDown(KEY_A)) dx -= spd;
+            if (IsKeyDown(KEY_D)) dx += spd;
+            if (IsKeyDown(KEY_E)) dy += spd;
+            if (IsKeyDown(KEY_Q)) dy -= spd;
+            sv->position.x += dx;
+            sv->position.y += dy;
+            sv->position.z += dz;
+
+            // Derive fake telemetry from movement
+            if (dx != 0 || dz != 0) {
+                sv->heading_deg = atan2f(dx, -dz) * RAD2DEG;
+                if (sv->heading_deg < 0) sv->heading_deg += 360.0f;
+                sv->roll_deg = dx / spd * 15.0f;
+                sv->pitch_deg = dz / spd * -10.0f;
+                sv->ground_speed = sqrtf(dx*dx + dz*dz) / GetFrameTime();
+            } else {
+                sv->roll_deg *= 0.9f;
+                sv->pitch_deg *= 0.9f;
+                sv->ground_speed *= 0.9f;
+            }
+            sv->vertical_speed = dy / GetFrameTime();
+            sv->altitude_rel = sv->position.y;
+
+            // Rebuild rotation quaternion from euler angles
+            Quaternion qYaw   = QuaternionFromAxisAngle((Vector3){0,1,0}, sv->heading_deg * DEG2RAD);
+            Quaternion qPitch = QuaternionFromAxisAngle((Vector3){1,0,0}, sv->pitch_deg * DEG2RAD);
+            Quaternion qRoll  = QuaternionFromAxisAngle((Vector3){0,0,1}, sv->roll_deg * DEG2RAD);
+            sv->rotation = QuaternionMultiply(qYaw, QuaternionMultiply(qPitch, qRoll));
+
+            // Sample trails for all vehicles
+            float dt = GetFrameTime();
+            for (int i = 0; i < vehicle_count; i++) {
+                vehicle_t *v = &vehicles[i];
+                v->trail_timer += dt;
+                if (v->trail_timer >= 0.05f) {
+                    v->trail_timer = 0.0f;
+                    v->trail[v->trail_head] = v->position;
+                    v->trail_roll[v->trail_head] = v->roll_deg;
+                    v->trail_pitch[v->trail_head] = v->pitch_deg;
+                    v->trail_vert[v->trail_head] = v->vertical_speed;
+                    v->trail_head = (v->trail_head + 1) % v->trail_capacity;
+                    if (v->trail_count < v->trail_capacity) v->trail_count++;
+                }
+            }
+        }
+
         // Update camera to follow selected vehicle
         scene_update_camera(&scene, vehicles[selected].position, vehicles[selected].rotation);
 
@@ -243,7 +327,7 @@ int main(int argc, char *argv[]) {
                 scene_draw(&scene);
                 for (int i = 0; i < vehicle_count; i++) {
                     if (vehicles[i].active || vehicle_count == 1) {
-                        vehicle_draw(&vehicles[i], scene.view_mode, i == selected);
+                        vehicle_draw(&vehicles[i], scene.view_mode, i == selected, show_trails);
                     }
                 }
             EndMode3D();
@@ -262,7 +346,7 @@ int main(int argc, char *argv[]) {
     hud_cleanup(&hud);
     for (int i = 0; i < vehicle_count; i++) {
         vehicle_cleanup(&vehicles[i]);
-        mavlink_receiver_close(&receivers[i]);
+        if (!fake) mavlink_receiver_close(&receivers[i]);
     }
     scene_cleanup(&scene);
     CloseWindow();

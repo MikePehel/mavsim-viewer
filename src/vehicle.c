@@ -13,7 +13,7 @@
 #define TRAIL_INTERVAL 0.05f
 
 static const char *model_paths[] = {
-    [VEHICLE_MULTICOPTER] = "models/3dr_arducopter_quad_x.obj",
+    [VEHICLE_MULTICOPTER] = "models/quadcopter_x4.obj",
     [VEHICLE_FIXEDWING]   = "models/cessna.obj",
     [VEHICLE_TAILSITTER]  = "models/x_vert.obj",
 };
@@ -32,7 +32,7 @@ static const float model_yaw_offset_deg[] = {
     [VEHICLE_TAILSITTER]  = 0.0f,
 };
 
-void vehicle_init(vehicle_t *v, vehicle_type_t type) {
+void vehicle_init(vehicle_t *v, vehicle_type_t type, Shader lighting_shader) {
     memset(v, 0, sizeof(*v));
     v->type = type;
     v->position = (Vector3){0};
@@ -56,9 +56,9 @@ void vehicle_init(vehicle_t *v, vehicle_type_t type) {
         printf("Warning: failed to load model %s\n", model_paths[type]);
     }
 
-    // Remap material colors
-    // MTL order: 0=default, 1=Blue_Metal, 2=Gray_Plastic, 3=Red_Metal, 4=Textolite
+    // Remap material colors based on diffuse color heuristics
     for (int i = 0; i < v->model.materialCount; i++) {
+        if (!v->model.materials[i].maps) continue;
         Color *c = &v->model.materials[i].maps[MATERIAL_MAP_DIFFUSE].color;
         // Blue_Metal → #272fc5
         if (c->b > 100 && c->r < 50)
@@ -68,12 +68,22 @@ void vehicle_init(vehicle_t *v, vehicle_type_t type) {
             *c = (Color){ 255, 47, 43, 255 };
             v->red_material_idx = i;
         }
-        // Gray_Plastic (props) → #5075a2
-        else if (c->r > 60 && c->r < 140 && c->g > 60 && c->g < 140)
+        // Motor_Silver / Prop_BlueGrey (mid-grey/blue-grey) → #5075a2
+        else if (c->r > 60 && c->r < 180 && c->g > 60 && c->g < 180 && c->b > 60)
             *c = (Color){ 80, 117, 162, 255 };
-        // Textolite (body, near-black) → #0e1f2f
-        else if (c->r < 20 && c->g < 20 && c->b < 20)
+        // Body/Motor/Leg dark (near-black) → #0e1f2f
+        else if (c->r < 40 && c->g < 40 && c->b < 55)
             *c = (Color){ 14, 31, 47, 255 };
+    }
+
+    // Assign lighting shader to all materials
+    v->lighting_shader = lighting_shader;
+    v->loc_matNormal = -1;
+    if (lighting_shader.id > 0) {
+        for (int i = 0; i < v->model.materialCount; i++) {
+            v->model.materials[i].shader = lighting_shader;
+        }
+        v->loc_matNormal = GetShaderLocation(lighting_shader, "matNormal");
     }
 }
 
@@ -151,7 +161,7 @@ void vehicle_update(vehicle_t *v, const hil_state_t *state) {
     }
 }
 
-void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected) {
+void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected, bool show_trails) {
     // In Rez/1988 mode, swap red arm color
     Color saved_red = {0};
     if ((view_mode == VIEW_REZ || view_mode == VIEW_1988) && v->red_material_idx >= 0) {
@@ -173,12 +183,18 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected) {
     Matrix trans = MatrixTranslate(v->position.x, v->position.y, v->position.z);
 
     // Transform = Scale * BaseRot * AttitudeRot * Translation
-    v->model.transform = MatrixMultiply(MatrixMultiply(MatrixMultiply(scale, base_rot), rot), trans);
+    Matrix rot_only = MatrixMultiply(base_rot, rot);
+    v->model.transform = MatrixMultiply(MatrixMultiply(scale, rot_only), trans);
+
+    // Set normal matrix (rotation only, no scale/translation) before drawing
+    if (v->loc_matNormal >= 0) {
+        SetShaderValueMatrix(v->lighting_shader, v->loc_matNormal, rot_only);
+    }
 
     DrawModel(v->model, (Vector3){0}, 1.0f, WHITE);
 
     // Draw path trail
-    if (v->trail_count > 1) {
+    if (show_trails && v->trail_count > 1) {
         int start = (v->trail_count < v->trail_capacity)
             ? 0
             : v->trail_head;
