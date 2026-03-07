@@ -5,24 +5,36 @@
 #include "mavlink_receiver.h"
 #include "scene.h"
 
-typedef enum {
-    VEHICLE_MULTICOPTER = 0,
-    VEHICLE_FIXEDWING,
-    VEHICLE_TAILSITTER,
-    VEHICLE_COUNT
-} vehicle_type_t;
+// Model descriptor — add new entries to vehicle_models[] in vehicle.c
+typedef struct {
+    const char *path;           // OBJ file path
+    const char *name;           // display name
+    float scale;
+    float pitch_offset_deg;    // pitch correction (applied before yaw, after X-90 base)
+    float yaw_offset_deg;      // yaw correction after Z-up → Y-up rotation
+} vehicle_model_info_t;
+
+extern const vehicle_model_info_t vehicle_models[];
+extern const int vehicle_model_count;
+
+// Default model indices (match vehicle_models[] order in vehicle.c)
+#define MODEL_MULTICOPTER 0
+#define MODEL_FIXEDWING   1
+#define MODEL_TAILSITTER  2
 
 typedef struct {
     Model model;
     Vector3 position;        // Raylib coords (Y-up, right-handed)
     Quaternion rotation;     // Raylib quaternion
-    vehicle_type_t type;
+    int model_idx;           // index into vehicle_models[]
     bool origin_set;
     bool active;             // has received data
     double lat0;             // radians
     double lon0;             // radians
     double alt0;             // meters
     float model_scale;
+    float pitch_offset_deg;  // per-model pitch correction
+    float yaw_offset_deg;    // per-model yaw correction
     float heading_deg;       // yaw 0-360
     float roll_deg;          // roll in degrees
     float pitch_deg;         // pitch in degrees
@@ -43,8 +55,14 @@ typedef struct {
     float trail_timer;
 } vehicle_t;
 
-// Load vehicle model. type selects which OBJ to load.
-void vehicle_init(vehicle_t *v, vehicle_type_t type);
+// Initialize vehicle state and load the model at model_idx.
+void vehicle_init(vehicle_t *v, int model_idx);
+
+// Swap to a different model at runtime (unloads old, loads new).
+void vehicle_load_model(vehicle_t *v, int model_idx);
+
+// Cycle to the next model in the registry.
+void vehicle_cycle_model(vehicle_t *v);
 
 // Update position/rotation from HIL_STATE_QUATERNION data.
 void vehicle_update(vehicle_t *v, const hil_state_t *state);

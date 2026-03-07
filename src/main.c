@@ -49,7 +49,7 @@ static void print_usage(const char *prog) {
 int main(int argc, char *argv[]) {
     uint16_t base_port = 19410;
     int vehicle_count = 1;
-    vehicle_type_t vtype = VEHICLE_MULTICOPTER;
+    int model_idx = MODEL_MULTICOPTER;
     int win_w = 1280;
     int win_h = 720;
     bool debug = false;
@@ -72,11 +72,11 @@ int main(int argc, char *argv[]) {
             origin_alt = atof(argv[++i]);
             origin_specified = true;
         } else if (strcmp(argv[i], "-mc") == 0) {
-            vtype = VEHICLE_MULTICOPTER;
+            model_idx = MODEL_MULTICOPTER;
         } else if (strcmp(argv[i], "-fw") == 0) {
-            vtype = VEHICLE_FIXEDWING;
+            model_idx = MODEL_FIXEDWING;
         } else if (strcmp(argv[i], "-ts") == 0) {
-            vtype = VEHICLE_TAILSITTER;
+            model_idx = MODEL_TAILSITTER;
         } else if (strcmp(argv[i], "-d") == 0) {
             debug = true;
         } else if (strcmp(argv[i], "-w") == 0 && i + 1 < argc) {
@@ -109,7 +109,7 @@ int main(int argc, char *argv[]) {
     // Init vehicles
     vehicle_t vehicles[MAX_VEHICLES];
     for (int i = 0; i < vehicle_count; i++) {
-        vehicle_init(&vehicles[i], vtype);
+        vehicle_init(&vehicles[i], model_idx);
         vehicles[i].color = vehicle_colors[i];
     }
 
@@ -174,6 +174,11 @@ int main(int argc, char *argv[]) {
         // Toggle HUD visibility
         if (IsKeyPressed(KEY_H)) {
             show_hud = !show_hud;
+        }
+
+        // Cycle model for selected vehicle
+        if (IsKeyPressed(KEY_M)) {
+            vehicle_cycle_model(&vehicles[selected]);
         }
 
         // Vehicle selection input

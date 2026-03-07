@@ -12,52 +12,20 @@
 #define TRAIL_MAX 2000
 #define TRAIL_INTERVAL 0.05f
 
-static const char *model_paths[] = {
-    [VEHICLE_MULTICOPTER] = "models/3dr_arducopter_quad_x.obj",
-    [VEHICLE_FIXEDWING]   = "models/cessna.obj",
-    [VEHICLE_TAILSITTER]  = "models/x_vert.obj",
+// ── Model registry ──────────────────────────────────────────────────────────
+// To add a new model: append an entry here and increment nothing else.
+const vehicle_model_info_t vehicle_models[] = {
+    //  path                                name            scale  pitch    yaw
+    { "models/3dr_arducopter_quad_x.obj", "Multicopter",  1.0f,    0.0f,   0.0f },
+    { "models/cessna.obj",                "Fixed-wing",   1.0f,    0.0f,  90.0f },
+    { "models/x_vert.obj",                "Tailsitter",   1.0f,  -90.0f,  90.0f },
 };
+const int vehicle_model_count = sizeof(vehicle_models) / sizeof(vehicle_models[0]);
 
-static const float model_scales[] = {
-    [VEHICLE_MULTICOPTER] = 1.0f,
-    [VEHICLE_FIXEDWING]   = 1.0f,
-    [VEHICLE_TAILSITTER]  = 1.0f,
-};
-
-// Per-model yaw correction (degrees) applied after the Z-up → Y-up base rotation.
-// Aligns each model's nose with the -Z (forward/North) direction in Raylib space.
-static const float model_yaw_offset_deg[] = {
-    [VEHICLE_MULTICOPTER] = 0.0f,
-    [VEHICLE_FIXEDWING]   = 90.0f,
-    [VEHICLE_TAILSITTER]  = 0.0f,
-};
-
-void vehicle_init(vehicle_t *v, vehicle_type_t type) {
-    memset(v, 0, sizeof(*v));
-    v->type = type;
-    v->position = (Vector3){0};
-    v->rotation = QuaternionIdentity();
-    v->origin_set = false;
-    v->active = false;
-    v->model_scale = model_scales[type];
+// ── Material remapping ──────────────────────────────────────────────────────
+// Heuristic color detection works across OBJ models with standard MTL colors.
+static void remap_materials(vehicle_t *v) {
     v->red_material_idx = -1;
-    v->color = WHITE;
-    v->trail = (Vector3 *)calloc(TRAIL_MAX, sizeof(Vector3));
-    v->trail_roll = (float *)calloc(TRAIL_MAX, sizeof(float));
-    v->trail_pitch = (float *)calloc(TRAIL_MAX, sizeof(float));
-    v->trail_vert = (float *)calloc(TRAIL_MAX, sizeof(float));
-    v->trail_capacity = TRAIL_MAX;
-    v->trail_count = 0;
-    v->trail_head = 0;
-    v->trail_timer = 0.0f;
-
-    v->model = LoadModel(model_paths[type]);
-    if (v->model.meshCount == 0) {
-        printf("Warning: failed to load model %s\n", model_paths[type]);
-    }
-
-    // Remap material colors
-    // MTL order: 0=default, 1=Blue_Metal, 2=Gray_Plastic, 3=Red_Metal, 4=Textolite
     for (int i = 0; i < v->model.materialCount; i++) {
         Color *c = &v->model.materials[i].maps[MATERIAL_MAP_DIFFUSE].color;
         // Blue_Metal → #272fc5
@@ -75,6 +43,56 @@ void vehicle_init(vehicle_t *v, vehicle_type_t type) {
         else if (c->r < 20 && c->g < 20 && c->b < 20)
             *c = (Color){ 14, 31, 47, 255 };
     }
+}
+
+// ── Model loading ───────────────────────────────────────────────────────────
+void vehicle_load_model(vehicle_t *v, int model_idx) {
+    // Clamp to valid range
+    if (model_idx < 0 || model_idx >= vehicle_model_count)
+        model_idx = 0;
+
+    // Unload previous model if loaded
+    if (v->model.meshCount > 0)
+        UnloadModel(v->model);
+
+    const vehicle_model_info_t *info = &vehicle_models[model_idx];
+    v->model_idx = model_idx;
+    v->model_scale = info->scale;
+    v->pitch_offset_deg = info->pitch_offset_deg;
+    v->yaw_offset_deg = info->yaw_offset_deg;
+
+    v->model = LoadModel(info->path);
+    if (v->model.meshCount == 0)
+        printf("Warning: failed to load model %s\n", info->path);
+
+    remap_materials(v);
+    printf("Model: %s\n", info->name);
+}
+
+void vehicle_cycle_model(vehicle_t *v) {
+    int next = (v->model_idx + 1) % vehicle_model_count;
+    vehicle_load_model(v, next);
+}
+
+// ── Init / update / draw ────────────────────────────────────────────────────
+void vehicle_init(vehicle_t *v, int model_idx) {
+    memset(v, 0, sizeof(*v));
+    v->position = (Vector3){0};
+    v->rotation = QuaternionIdentity();
+    v->origin_set = false;
+    v->active = false;
+    v->red_material_idx = -1;
+    v->color = WHITE;
+    v->trail = (Vector3 *)calloc(TRAIL_MAX, sizeof(Vector3));
+    v->trail_roll = (float *)calloc(TRAIL_MAX, sizeof(float));
+    v->trail_pitch = (float *)calloc(TRAIL_MAX, sizeof(float));
+    v->trail_vert = (float *)calloc(TRAIL_MAX, sizeof(float));
+    v->trail_capacity = TRAIL_MAX;
+    v->trail_count = 0;
+    v->trail_head = 0;
+    v->trail_timer = 0.0f;
+
+    vehicle_load_model(v, model_idx);
 }
 
 void vehicle_update(vehicle_t *v, const hil_state_t *state) {
@@ -166,8 +184,10 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected) {
     // Raylib: Y is up. Rotate +90° around X so model Z → Raylib Y,
     // then apply per-model yaw correction to align nose with -Z (forward).
     Matrix base_rot = MatrixMultiply(
-        MatrixRotateX(90.0f * DEG2RAD),
-        MatrixRotateY(model_yaw_offset_deg[v->type] * DEG2RAD));
+        MatrixMultiply(
+            MatrixRotateX(90.0f * DEG2RAD),
+            MatrixRotateZ(v->pitch_offset_deg * DEG2RAD)),
+        MatrixRotateY(v->yaw_offset_deg * DEG2RAD));
     Matrix rot = QuaternionToMatrix(v->rotation);
     Matrix scale = MatrixScale(v->model_scale, v->model_scale, v->model_scale);
     Matrix trans = MatrixTranslate(v->position.x, v->position.y, v->position.z);
