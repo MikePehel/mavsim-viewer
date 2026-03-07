@@ -3,7 +3,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#ifndef _WIN32
 #include <time.h>
+#endif
 
 #ifdef _WIN32
 #include <ws2tcpip.h>
@@ -24,9 +26,16 @@
 #define DISCONNECT_TIMEOUT_S 2.0
 
 static double get_wall_time(void) {
+#ifdef _WIN32
+    LARGE_INTEGER freq, count;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&count);
+    return (double)count.QuadPart / (double)freq.QuadPart;
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+#endif
 }
 
 static int set_nonblocking(sock_t s) {
