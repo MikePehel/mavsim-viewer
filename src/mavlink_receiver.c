@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
 
 #ifdef _WIN32
 #include <ws2tcpip.h>
@@ -19,6 +20,14 @@
 // MAVLink config: use common message set
 // MAVLINK_COMM_NUM_BUFFERS=16 set via CMake for multi-vehicle support
 #include <mavlink.h>
+
+#define DISCONNECT_TIMEOUT_S 2.0
+
+static double get_wall_time(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+}
 
 static int set_nonblocking(sock_t s) {
 #ifdef _WIN32
@@ -75,12 +84,14 @@ void mavlink_receiver_poll(mavlink_receiver_t *recv) {
     uint8_t buf[2048];
     struct sockaddr_in sender;
     socklen_t sender_len = sizeof(sender);
+    bool got_data = false;
 
     for (;;) {
         int n = recvfrom(recv->sockfd, (char *)buf, sizeof(buf), 0,
                          (struct sockaddr *)&sender, &sender_len);
         if (n <= 0) break;
 
+        got_data = true;
         mavlink_message_t msg;
         mavlink_status_t status;
 
@@ -116,6 +127,7 @@ void mavlink_receiver_poll(mavlink_receiver_t *recv) {
                         recv->state.vz = hil.vz;
                         recv->state.ind_airspeed = hil.ind_airspeed;
                         recv->state.true_airspeed = hil.true_airspeed;
+                        recv->state.time_usec = hil.time_usec;
                         recv->state.valid = true;
 
                         if (recv->debug) {
@@ -128,6 +140,17 @@ void mavlink_receiver_poll(mavlink_receiver_t *recv) {
                     }
                 }
             }
+        }
+    }
+
+    if (got_data) {
+        recv->last_msg_time = get_wall_time();
+    } else if (recv->connected && recv->last_msg_time > 0) {
+        double now = get_wall_time();
+        if (now - recv->last_msg_time > DISCONNECT_TIMEOUT_S) {
+            recv->connected = false;
+            recv->state.valid = false;
+            printf("Disconnected from system %u\n", recv->sysid);
         }
     }
 }
