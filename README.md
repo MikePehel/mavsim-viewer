@@ -114,6 +114,7 @@ The test script accepts these options:
 | `C` | Toggle camera mode (Chase / FPV) |
 | `V` | Cycle view mode (Grid / Rez) |
 | `H` | Toggle HUD visibility |
+| `M` | Cycle vehicle model |
 | `TAB` | Cycle to next vehicle |
 | `[` / `]` | Previous / next vehicle |
 | `1`-`9` | Select vehicle directly |
