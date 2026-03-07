@@ -1,6 +1,7 @@
 #include "scene.h"
 #include "raymath.h"
 #include "rlgl.h"
+#include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
 
@@ -36,6 +37,145 @@
 #define SYNTH_MAJOR    (Color){ 255, 20, 100, 160 }   // hot pink, bright
 #define SYNTH_AXIS_X   (Color){ 255, 20, 100, 220 }   // hot pink, full
 #define SYNTH_AXIS_Z   (Color){ 255, 20, 100, 220 }   // hot pink, full
+
+// 1988 mountain settings
+#define MTN_COLOR      (Color){ 1, 156, 227, 255 }    // #019CE3 teal
+#define MTN_COLS       40       // subdivisions along edge
+#define MTN_ROWS       12       // subdivisions deep
+#define MTN_DEPTH      400.0f   // how far mountains extend from grid edge
+#define MTN_PEAK       350.0f   // max mountain height
+
+static float mtn_hash(int x, int y) {
+    unsigned int h = (unsigned int)(x * 7919 + y * 104729 + 31337);
+    h ^= h >> 13;
+    h *= 0x5bd1e995;
+    h ^= h >> 15;
+    return (float)(h & 0xFFFF) / 65535.0f;
+}
+
+// Smooth value noise
+static float mtn_vnoise(float x, float y) {
+    int ix = (int)floorf(x), iy = (int)floorf(y);
+    float fx = x - ix, fy = y - iy;
+    fx = fx * fx * (3.0f - 2.0f * fx);
+    fy = fy * fy * (3.0f - 2.0f * fy);
+    float a = mtn_hash(ix, iy), b = mtn_hash(ix+1, iy);
+    float c = mtn_hash(ix, iy+1), d = mtn_hash(ix+1, iy+1);
+    return a + (b-a)*fx + (c-a)*fy + (a-b-c+d)*fx*fy;
+}
+
+// FBM noise with 3 octaves
+static float mtn_fbm(float x, float y) {
+    float v = 0.0f;
+    v += mtn_vnoise(x, y) * 1.0f;
+    v += mtn_vnoise(x*2.0f + 5.3f, y*2.0f + 1.7f) * 0.5f;
+    v += mtn_vnoise(x*4.0f + 9.1f, y*4.0f + 3.2f) * 0.25f;
+    return v / 1.75f;
+}
+
+// Get height at a point on an edge strip
+static float mtn_get_height(float along, float deep, int edge) {
+    // along: 0-1 along edge, deep: 0-1 from grid edge outward
+    // Depth envelope: 0 at grid edge, rises, stays, tapers at back
+    float env = sinf(deep * 3.14159f);
+    env = powf(env, 0.6f); // broader peak
+
+    // Along-edge taper: fade to ground at both ends
+    float edge_taper = 1.0f;
+    if (along < 0.15f) edge_taper = along / 0.15f;
+    else if (along > 0.85f) edge_taper = (1.0f - along) / 0.15f;
+    edge_taper = edge_taper * edge_taper; // smooth quadratic
+    env *= edge_taper;
+
+    float ox = along * 5.0f + edge * 13.7f;
+    float oy = deep * 3.0f + edge * 7.3f;
+    float n = mtn_fbm(ox, oy);
+    // Ridged noise for sharp jagged peaks
+    float ridge = 1.0f - fabsf(n * 2.0f - 1.0f);
+    ridge = powf(ridge, 2.0f);
+    // Extra altitude variation along the ridgeline
+    float variation = mtn_vnoise(along * 3.0f + edge * 5.1f, deep * 1.5f + edge * 2.3f);
+    variation = 0.3f + 0.7f * variation; // range 0.3 to 1.0
+    float h = env * ridge * variation * MTN_PEAK;
+    // Gently push low areas down
+    if (h < MTN_PEAK * 0.15f) h *= 0.7f;
+    return h;
+}
+
+static void mtn_vert(Mesh *m, int vi, float x, float y, float z,
+                     float bx, float by, unsigned char r, unsigned char g, unsigned char b) {
+    m->vertices[vi*3+0] = x;  m->vertices[vi*3+1] = y;  m->vertices[vi*3+2] = z;
+    m->texcoords[vi*2+0] = bx; m->texcoords[vi*2+1] = by;
+    m->colors[vi*4+0] = r; m->colors[vi*4+1] = g; m->colors[vi*4+2] = b; m->colors[vi*4+3] = 255;
+}
+
+static Mesh gen_mountains(void) {
+    // 4 edges, each MTN_COLS x MTN_ROWS quads, 2 tris per quad, 3 verts per tri
+    int total_tris = 4 * MTN_COLS * MTN_ROWS * 2;
+    int vert_count = total_tris * 3;
+
+    Mesh mesh = { 0 };
+    mesh.triangleCount = total_tris;
+    mesh.vertexCount = vert_count;
+    mesh.vertices = RL_CALLOC(vert_count * 3, sizeof(float));
+    mesh.texcoords = RL_CALLOC(vert_count * 2, sizeof(float));
+    mesh.colors = RL_CALLOC(vert_count * 4, sizeof(unsigned char));
+
+    float ext = GRID_EXTENT;
+    unsigned char cr = MTN_COLOR.r, cg = MTN_COLOR.g, cb = MTN_COLOR.b;
+
+    // Edge: start_x, start_z, along_dx, along_dz, out_nx, out_nz
+    float edges[4][6] = {
+        { -ext, -ext,  1,  0,  0, -1 },  // south
+        {  ext, -ext,  0,  1,  1,  0 },  // east
+        {  ext,  ext, -1,  0,  0,  1 },  // north
+        { -ext,  ext,  0, -1, -1,  0 },  // west
+    };
+
+    int vi = 0;
+    for (int e = 0; e < 4; e++) {
+        float sx = edges[e][0], sz = edges[e][1];
+        float adx = edges[e][2], adz = edges[e][3];
+        float onx = edges[e][4], onz = edges[e][5];
+        float elen = 2.0f * ext;
+
+        for (int c = 0; c < MTN_COLS; c++) {
+            for (int r = 0; r < MTN_ROWS; r++) {
+                float a0 = (float)c / MTN_COLS, a1 = (float)(c+1) / MTN_COLS;
+                float d0 = (float)r / MTN_ROWS, d1 = (float)(r+1) / MTN_ROWS;
+
+                // World positions of 4 quad corners
+                float x00 = sx + adx*a0*elen + onx*d0*MTN_DEPTH;
+                float z00 = sz + adz*a0*elen + onz*d0*MTN_DEPTH;
+                float y00 = mtn_get_height(a0, d0, e);
+
+                float x10 = sx + adx*a1*elen + onx*d0*MTN_DEPTH;
+                float z10 = sz + adz*a1*elen + onz*d0*MTN_DEPTH;
+                float y10 = mtn_get_height(a1, d0, e);
+
+                float x01 = sx + adx*a0*elen + onx*d1*MTN_DEPTH;
+                float z01 = sz + adz*a0*elen + onz*d1*MTN_DEPTH;
+                float y01 = mtn_get_height(a0, d1, e);
+
+                float x11 = sx + adx*a1*elen + onx*d1*MTN_DEPTH;
+                float z11 = sz + adz*a1*elen + onz*d1*MTN_DEPTH;
+                float y11 = mtn_get_height(a1, d1, e);
+
+                // Tri 1: 00, 10, 01 — barycentric (1,0), (0,1), (0,0)
+                mtn_vert(&mesh, vi++, x00,y00,z00, 1,0, cr,cg,cb);
+                mtn_vert(&mesh, vi++, x10,y10,z10, 0,1, cr,cg,cb);
+                mtn_vert(&mesh, vi++, x01,y01,z01, 0,0, cr,cg,cb);
+                // Tri 2: 10, 11, 01
+                mtn_vert(&mesh, vi++, x10,y10,z10, 1,0, cr,cg,cb);
+                mtn_vert(&mesh, vi++, x11,y11,z11, 0,1, cr,cg,cb);
+                mtn_vert(&mesh, vi++, x01,y01,z01, 0,0, cr,cg,cb);
+            }
+        }
+    }
+
+    UploadMesh(&mesh, false);
+    return mesh;
+}
 
 void scene_init(scene_t *s) {
     s->cam_mode = CAM_MODE_CHASE;
@@ -105,6 +245,12 @@ void scene_init(scene_t *s) {
     Mesh grid_mesh = GenMeshPlane(GROUND_SIZE * 2, GROUND_SIZE * 2, 100, 100);
     s->grid_plane = LoadModelFromMesh(grid_mesh);
     s->grid_plane.materials[0].shader = s->grid_shader;
+
+    // 1988 mountains
+    s->mtn_shader = LoadShader("shaders/mountain.vs", "shaders/mountain.fs");
+    Mesh mtn_mesh = gen_mountains();
+    s->mountains = LoadModelFromMesh(mtn_mesh);
+    s->mountains.materials[0].shader = s->mtn_shader;
 }
 
 static void update_chase_camera(scene_t *s, Vector3 pos) {
@@ -237,6 +383,10 @@ void scene_draw(const scene_t *s) {
         draw_shader_grid(s, REZ_GROUND, REZ_MINOR, REZ_MAJOR, REZ_AXIS_X, REZ_AXIS_Z);
     } else if (s->view_mode == VIEW_1988) {
         draw_shader_grid(s, SYNTH_GROUND, SYNTH_MINOR, SYNTH_MAJOR, SYNTH_AXIS_X, SYNTH_AXIS_Z);
+        // Draw mountains with wireframe shader
+        rlDisableBackfaceCulling();
+        DrawModel(s->mountains, (Vector3){0, 0, 0}, 1.0f, WHITE);
+        rlEnableBackfaceCulling();
     } else {
         // Sky sphere centered on camera — disable culling so we see it from inside
         rlDisableBackfaceCulling();
@@ -266,4 +416,6 @@ void scene_cleanup(scene_t *s) {
     UnloadShader(s->grid_shader);
     if (s->ground_tex.id > 0) UnloadTexture(s->ground_tex);
     if (s->sky_tex.id > 0) UnloadTexture(s->sky_tex);
+    UnloadModel(s->mountains);
+    UnloadShader(s->mtn_shader);
 }

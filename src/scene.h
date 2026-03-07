@@ -42,6 +42,9 @@ typedef struct {
     int loc_matModel;
     Model grid_plane;    // separate ground plane for grid modes
     int seq_1988;        // key sequence tracker
+    // 1988 mountains
+    Shader mtn_shader;
+    Model mountains;     // wireframe mountain terrain
 } scene_t;
 
 // Initialize scene (ground plane, sky, camera, lighting).
