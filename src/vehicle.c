@@ -50,7 +50,6 @@ void vehicle_init(vehicle_t *v, vehicle_type_t type) {
     v->trail_count = 0;
     v->trail_head = 0;
     v->trail_timer = 0.0f;
-    v->show_trail = false;
 
     v->model = LoadModel(model_paths[type]);
     if (v->model.meshCount == 0) {
@@ -178,8 +177,8 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected) {
 
     DrawModel(v->model, (Vector3){0}, 1.0f, WHITE);
 
-    // Draw path trail (toggled with T)
-    if (v->show_trail && v->trail_count > 1) {
+    // Draw path trail
+    if (v->trail_count > 1) {
         int start = (v->trail_count < v->trail_capacity)
             ? 0
             : v->trail_head;
@@ -190,8 +189,7 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected) {
             trail_color = (Color){ 255, 106, 0, 160 };    // orange
         else
             trail_color = (Color){ 255, 200, 50, 180 };   // yellow
-
-        // Per-mode color palette for movement-based tinting
+        // Per-mode color palette
         Color col_back, col_up, col_down, col_roll_pos, col_roll_neg;
         if (view_mode == VIEW_1988) {
             col_back     = (Color){ 255, 20, 100, 255 };  // pink
@@ -227,7 +225,7 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected) {
             float cg = (float)trail_color.g;
             float cb = (float)trail_color.b;
 
-            // Backward: positive pitch = nose up
+            // Backward: pitch > 0 means nose up / moving backward
             float back_t = pitch / 15.0f;
             if (back_t < 0.0f) back_t = 0.0f;
             if (back_t > 1.0f) back_t = 1.0f;
@@ -236,7 +234,7 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected) {
             cb += (col_back.b - cb) * back_t;
 
             // Vertical: ascending / descending
-            float vert_t = vert / 5.0f;
+            float vert_t = vert / 5.0f;  // ±5 m/s = full tint
             if (vert_t > 1.0f) vert_t = 1.0f;
             if (vert_t < -1.0f) vert_t = -1.0f;
             if (vert_t > 0.0f) {
