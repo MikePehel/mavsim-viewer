@@ -41,7 +41,6 @@ typedef struct {
     int trail_head;
     int trail_capacity;
     float trail_timer;
-    bool show_trail;
 } vehicle_t;
 
 // Load vehicle model. type selects which OBJ to load.
