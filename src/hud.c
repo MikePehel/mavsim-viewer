@@ -666,6 +666,14 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
     }
 }
 
+int hud_bar_height(const hud_t *h, int screen_h) {
+    float s = powf(screen_h / 720.0f, 0.7f);
+    if (s < 1.0f) s = 1.0f;
+    int primary_h = (int)(120 * s);
+    int secondary_h = (int)(38 * s);
+    return primary_h + (h->pinned_count > 0 ? h->pinned_count * secondary_h + (int)(4 * s) : 0);
+}
+
 void hud_cleanup(hud_t *h) {
     UnloadFont(h->font_value);
     UnloadFont(h->font_label);

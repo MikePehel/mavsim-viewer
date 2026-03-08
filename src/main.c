@@ -12,6 +12,8 @@
 #include "vehicle.h"
 #include "scene.h"
 #include "hud.h"
+#include "ortho_panel.h"
+#include "debug_panel.h"
 
 #define MAX_VEHICLES 16
 
@@ -49,10 +51,11 @@ static void print_usage(const char *prog) {
 int main(int argc, char *argv[]) {
     uint16_t base_port = 19410;
     int vehicle_count = 1;
-    int model_idx = MODEL_MULTICOPTER;
+    int model_idx = MODEL_QUADROTOR;
     int win_w = 1280;
     int win_h = 720;
     bool debug = false;
+    bool dummy_mode = false;
     // PX4 SIH default spawn position
     double origin_lat = 47.397742;
     double origin_lon = 8.545594;
@@ -72,11 +75,15 @@ int main(int argc, char *argv[]) {
             origin_alt = atof(argv[++i]);
             origin_specified = true;
         } else if (strcmp(argv[i], "-mc") == 0) {
-            model_idx = MODEL_MULTICOPTER;
+            model_idx = MODEL_QUADROTOR;
         } else if (strcmp(argv[i], "-fw") == 0) {
             model_idx = MODEL_FIXEDWING;
         } else if (strcmp(argv[i], "-ts") == 0) {
             model_idx = MODEL_TAILSITTER;
+        } else if (strcmp(argv[i], "-rv") == 0) {
+            model_idx = MODEL_ROVER;
+        } else if (strcmp(argv[i], "-dummy") == 0) {
+            dummy_mode = true;
         } else if (strcmp(argv[i], "-d") == 0) {
             debug = true;
         } else if (strcmp(argv[i], "-w") == 0 && i + 1 < argc) {
@@ -106,11 +113,23 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    // Init scene first (provides lighting shader for vehicles)
+    scene_t scene;
+    scene_init(&scene);
+
     // Init vehicles
     vehicle_t vehicles[MAX_VEHICLES];
     for (int i = 0; i < vehicle_count; i++) {
-        vehicle_init(&vehicles[i], model_idx);
+        vehicle_init(&vehicles[i], model_idx, scene.lighting_shader);
         vehicles[i].color = vehicle_colors[i];
+    }
+
+    // Dummy mode: make drones active and airborne immediately
+    if (dummy_mode) {
+        for (int i = 0; i < vehicle_count; i++) {
+            vehicles[i].active = true;
+            vehicles[i].position = (Vector3){ i * 5.0f, 0.0f, 0.0f };
+        }
     }
 
     // For multi-vehicle or explicit origin: pre-set the NED origin on all vehicles
@@ -126,16 +145,21 @@ int main(int argc, char *argv[]) {
         printf("NED origin: lat=%.6f lon=%.6f alt=%.1f\n", origin_lat, origin_lon, origin_alt);
     }
 
-    scene_t scene;
-    scene_init(&scene);
-
     hud_t hud;
     hud_init(&hud);
+
+    ortho_panel_t ortho;
+    ortho_panel_init(&ortho);
+
+    debug_panel_t dbg_panel;
+    debug_panel_init(&dbg_panel);
 
     int selected = 0;
     bool was_connected[MAX_VEHICLES];
     memset(was_connected, 0, sizeof(was_connected));
     bool show_hud = true;
+    int trail_mode = 1;  // 0=off, 1=normal trail, 2=speed ribbon
+    bool show_ground_track = false;
 
     // Main loop
     while (!WindowShouldClose()) {
@@ -174,6 +198,26 @@ int main(int argc, char *argv[]) {
         // Toggle HUD visibility
         if (IsKeyPressed(KEY_H)) {
             show_hud = !show_hud;
+        }
+
+        // Toggle ortho panel
+        if (IsKeyPressed(KEY_O)) {
+            ortho.visible = !ortho.visible;
+        }
+
+        // Cycle trail mode: off → normal → speed ribbon → off
+        if (IsKeyPressed(KEY_T)) {
+            trail_mode = (trail_mode + 1) % 3;
+        }
+
+        // Toggle ground track projection
+        if (IsKeyPressed(KEY_G)) {
+            show_ground_track = !show_ground_track;
+        }
+
+        // Toggle debug panel (Ctrl+D)
+        if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_D)) {
+            dbg_panel.visible = !dbg_panel.visible;
         }
 
         // Cycle model for selected vehicle
@@ -244,8 +288,112 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        // Fake drone WASDQE controls with drag physics
+        if (dummy_mode) {
+            static float vel_x[MAX_VEHICLES] = {0};
+            static float vel_y[MAX_VEHICLES] = {0};
+            static float vel_z[MAX_VEHICLES] = {0};
+
+            float dt = GetFrameTime();
+            float accel = 50.0f;    // m/s² thrust
+            float drag = 2.0f;      // drag coefficient (velocity decay)
+            vehicle_t *v = &vehicles[selected];
+            float prev_y = v->position.y;
+
+            // Apply thrust from input
+            float ax = 0.0f, az = 0.0f, ay = 0.0f;
+            if (IsKeyDown(KEY_W)) az -= accel;
+            if (IsKeyDown(KEY_S)) az += accel;
+            if (IsKeyDown(KEY_A)) ax -= accel;
+            if (IsKeyDown(KEY_D)) ax += accel;
+            if (IsKeyDown(KEY_E)) ay += accel;
+            if (IsKeyDown(KEY_Q)) ay -= accel;
+
+            // Integrate velocity with drag
+            vel_x[selected] += ax * dt;
+            vel_y[selected] += ay * dt;
+            vel_z[selected] += az * dt;
+            vel_x[selected] *= (1.0f - drag * dt);
+            vel_y[selected] *= (1.0f - drag * dt);
+            vel_z[selected] *= (1.0f - drag * dt);
+
+            // Integrate position
+            v->position.x += vel_x[selected] * dt;
+            v->position.y += vel_y[selected] * dt;
+            v->position.z += vel_z[selected] * dt;
+            if (v->position.y < 0.0f) { v->position.y = 0.0f; vel_y[selected] = 0.0f; }
+            v->active = true;
+
+            float dx = vel_x[selected] * dt;
+            float dz = vel_z[selected] * dt;
+
+            // Fake roll/pitch from velocity
+            float fake_roll = vel_x[selected] / 8.0f * 30.0f;
+            if (fake_roll > 30.0f) fake_roll = 30.0f;
+            if (fake_roll < -30.0f) fake_roll = -30.0f;
+            float fake_pitch = -vel_z[selected] / 8.0f * 20.0f;
+            if (fake_pitch > 20.0f) fake_pitch = 20.0f;
+            if (fake_pitch < -20.0f) fake_pitch = -20.0f;
+            float fake_vert = (v->position.y - prev_y) / (dt > 0.0f ? dt : 0.016f);
+
+            // Compute heading from velocity direction
+            float fake_heading = v->heading_deg;
+            float hspd = sqrtf(vel_x[selected] * vel_x[selected] + vel_z[selected] * vel_z[selected]);
+            if (hspd > 0.5f)
+                fake_heading = atan2f(vel_x[selected], -vel_z[selected]) * RAD2DEG;
+            if (fake_heading < 0.0f) fake_heading += 360.0f;
+
+            // Apply banking rotation to model
+            v->rotation = QuaternionFromEuler(
+                fake_pitch * DEG2RAD,  // pitch
+                0.0f,                   // yaw
+                -fake_roll * DEG2RAD   // roll
+            );
+
+            // Set HUD telemetry fields
+            v->roll_deg = fake_roll;
+            v->pitch_deg = fake_pitch;
+            v->heading_deg = fake_heading;
+            v->vertical_speed = fake_vert;
+            v->altitude_rel = v->position.y;
+            v->ground_speed = hspd;
+
+            // Sample trail in fake mode (time or distance)
+            float fdist = 0.0f;
+            if (v->trail_count > 0) {
+                int last = (v->trail_head - 1 + v->trail_capacity) % v->trail_capacity;
+                float fdx = v->position.x - v->trail[last].x;
+                float fdy = v->position.y - v->trail[last].y;
+                float fdz = v->position.z - v->trail[last].z;
+                fdist = sqrtf(fdx*fdx + fdy*fdy + fdz*fdz);
+            }
+            v->trail_timer += dt;
+            if (v->trail_timer >= 0.05f || fdist >= 0.01f) {
+                v->trail_timer = 0.0f;
+                v->trail[v->trail_head] = v->position;
+                v->trail_roll[v->trail_head] = fake_roll;
+                v->trail_pitch[v->trail_head] = fake_pitch;
+                v->trail_vert[v->trail_head] = fake_vert;
+                v->trail_speed[v->trail_head] = sqrtf(vel_x[selected] * vel_x[selected] +
+                                                       vel_y[selected] * vel_y[selected] +
+                                                       vel_z[selected] * vel_z[selected]);
+                v->trail_head = (v->trail_head + 1) % v->trail_capacity;
+                if (v->trail_count < v->trail_capacity) v->trail_count++;
+            }
+        }
+
+        // Update debug panel
+        debug_panel_update(&dbg_panel, GetFrameTime());
+
         // Update camera to follow selected vehicle
         scene_update_camera(&scene, vehicles[selected].position, vehicles[selected].rotation);
+
+        // Render ortho views to textures (before main BeginDrawing)
+        if (ortho.visible) {
+            ortho_panel_update(&ortho, vehicles[selected].position);
+            ortho_panel_render(&ortho, &scene, vehicles, vehicle_count,
+                               selected, scene.view_mode, trail_mode);
+        }
 
         // Render
         BeginDrawing();
@@ -257,10 +405,14 @@ int main(int argc, char *argv[]) {
                 scene_draw(&scene);
                 for (int i = 0; i < vehicle_count; i++) {
                     if (vehicles[i].active || vehicle_count == 1) {
-                        vehicle_draw(&vehicles[i], scene.view_mode, i == selected);
+                        vehicle_draw(&vehicles[i], scene.view_mode, i == selected,
+                                     trail_mode, show_ground_track, scene.camera.position);
                     }
                 }
             EndMode3D();
+
+            // Ortho ground fill (2D overlay)
+            scene_draw_ortho_ground(&scene, GetScreenWidth(), GetScreenHeight());
 
             // HUD
             if (show_hud) {
@@ -269,10 +421,34 @@ int main(int argc, char *argv[]) {
                          scene.view_mode);
             }
 
+            // Ortho panel overlay
+            int bar_h = show_hud ? hud_bar_height(&hud, GetScreenHeight()) : 0;
+            ortho_panel_draw(&ortho, GetScreenHeight(), bar_h, scene.view_mode, hud.font_label);
+
+            // Fullscreen ortho view label
+            ortho_panel_draw_fullscreen_label(GetScreenWidth(), GetScreenHeight(),
+                scene.ortho_mode, scene.ortho_span, scene.view_mode, hud.font_label);
+
+            // Debug panel
+            {
+                int active_count = 0;
+                int total_trail = 0;
+                for (int i = 0; i < vehicle_count; i++) {
+                    if (vehicles[i].active) active_count++;
+                    total_trail += vehicles[i].trail_count;
+                }
+                debug_panel_draw(&dbg_panel, GetScreenWidth(), GetScreenHeight(),
+                                 scene.view_mode, hud.font_label,
+                                 vehicle_count, active_count,
+                                 total_trail, ortho.visible,
+                                 scene.ortho_mode);
+            }
+
         EndDrawing();
     }
 
     // Cleanup
+    ortho_panel_cleanup(&ortho);
     hud_cleanup(&hud);
     for (int i = 0; i < vehicle_count; i++) {
         vehicle_cleanup(&vehicles[i]);

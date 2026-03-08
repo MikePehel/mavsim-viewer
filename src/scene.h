@@ -10,6 +10,17 @@ typedef enum {
     CAM_MODE_COUNT
 } camera_mode_t;
 
+// Fullscreen orthographic views (0 = off/perspective)
+typedef enum {
+    ORTHO_NONE = 0,
+    ORTHO_TOP,      // Alt+2
+    ORTHO_BOTTOM,   // Alt+3
+    ORTHO_FRONT,    // Alt+4
+    ORTHO_BACK,     // Alt+5
+    ORTHO_LEFT,     // Alt+6
+    ORTHO_RIGHT,    // Alt+7
+} ortho_mode_t;
+
 typedef enum {
     VIEW_GRID = 0,
     VIEW_REZ,
@@ -39,6 +50,16 @@ typedef struct {
     int loc_matModel;
     Model grid_plane;    // separate ground plane for grid modes
     int seq_1988;        // key sequence tracker
+    ortho_mode_t ortho_mode; // fullscreen ortho view (0 = perspective)
+    float ortho_span;        // ortho view span in world units
+    // 1988 mountains
+    Shader mtn_shader;
+    Model mountains;
+    // Vehicle lighting shader
+    Shader lighting_shader;
+    int loc_lightDir;
+    int loc_ambient;
+    int loc_matNormal;
 } scene_t;
 
 // Initialize scene (ground plane, sky, camera, lighting).
@@ -55,6 +76,9 @@ void scene_draw(const scene_t *s);
 
 // Draw sky background. Call before BeginMode3D.
 void scene_draw_sky(const scene_t *s);
+
+// Draw ground fill for ortho side views (call after EndMode3D).
+void scene_draw_ortho_ground(const scene_t *s, int screen_w, int screen_h);
 
 // Cleanup scene resources.
 void scene_cleanup(scene_t *s);

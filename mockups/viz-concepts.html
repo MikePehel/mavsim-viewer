@@ -1,0 +1,1378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MAVSim Viewer - Visualization Concepts</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    padding: 40px;
+  }
+  h1 {
+    text-align: center;
+    font-size: 28px;
+    color: #fff;
+    margin-bottom: 8px;
+    letter-spacing: 1px;
+  }
+  .subtitle {
+    text-align: center;
+    color: #888;
+    font-size: 14px;
+    margin-bottom: 40px;
+  }
+  .section-title {
+    font-size: 18px;
+    color: #0cc;
+    margin: 40px 0 20px;
+    border-bottom: 1px solid #333;
+    padding-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+    gap: 24px;
+    margin-bottom: 40px;
+  }
+  .card {
+    background: #16213e;
+    border: 1px solid #2a2a4a;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .card canvas {
+    width: 100%;
+    display: block;
+    background: #0f0f23;
+  }
+  .card-info {
+    padding: 16px 20px;
+  }
+  .card-info h3 {
+    font-size: 16px;
+    color: #fff;
+    margin-bottom: 6px;
+  }
+  .card-info p {
+    font-size: 13px;
+    color: #999;
+    line-height: 1.5;
+  }
+  .card-info .data-source {
+    display: inline-block;
+    background: #0cc3;
+    color: #0cc;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+
+<h1>MAVSim Viewer - Visualization Concepts</h1>
+<p class="subtitle">All derived from HIL_STATE_QUATERNION (position, orientation, velocity, airspeed, time)</p>
+
+<div class="section-title">Position / Velocity Derived</div>
+<div class="grid">
+  <div class="card">
+    <canvas id="velocityVector" width="500" height="340"></canvas>
+    <div class="card-info">
+      <h3>Velocity Vector Arrow</h3>
+      <p>3D arrow from drone showing actual travel direction. The angle between nose (white) and velocity (green) reveals sideslip and drift — critical for controller tuning.</p>
+      <span class="data-source">vx, vy, vz + quaternion</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <canvas id="groundTrack" width="500" height="340"></canvas>
+    <div class="card-info">
+      <h3>Ground Track Projection</h3>
+      <p>Shadow/line directly below the drone on the grid plane. Makes altitude separation instantly readable without checking the HUD numbers.</p>
+      <span class="data-source">position (x, y, z)</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <canvas id="altitudeRuler" width="500" height="340"></canvas>
+    <div class="card-info">
+      <h3>Distance / Altitude Ruler</h3>
+      <p>Thin vertical line from drone to ground with tick marks every N meters. A visual altimeter that works from any camera angle.</p>
+      <span class="data-source">position.y (altitude)</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <canvas id="speedRibbon" width="500" height="340"></canvas>
+    <div class="card-info">
+      <h3>Speed Ribbon Trail</h3>
+      <p>Trail thickness scales with ground speed. Instantly shows acceleration/deceleration zones. Thin = slow, wide = fast.</p>
+      <span class="data-source">ground_speed (from vx, vy)</span>
+    </div>
+  </div>
+</div>
+
+<div class="section-title">Quaternion / Attitude Derived</div>
+<div class="grid">
+  <div class="card">
+    <canvas id="attitudeHorizon" width="500" height="340"></canvas>
+    <div class="card-info">
+      <h3>Attitude Ghost Horizon</h3>
+      <p>A small artificial horizon disc near the drone showing bank and pitch. Like a cockpit instrument floating in 3D space — readable at any zoom level.</p>
+      <span class="data-source">quaternion (roll, pitch)</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <canvas id="bodyAxes" width="500" height="340"></canvas>
+    <div class="card-info">
+      <h3>Body Axis Indicators</h3>
+      <p>Short colored lines: red=right, green=up, blue=forward. Shows orientation at a distance where the model shape is ambiguous (especially for symmetric quads).</p>
+      <span class="data-source">quaternion</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <canvas id="aoaViz" width="500" height="340"></canvas>
+    <div class="card-info">
+      <h3>Angle of Attack Visualization</h3>
+      <p>The angle between velocity vector and nose direction. For fixed-wing and VTOL, shows stall risk. Arc fills red as AoA increases toward critical angle.</p>
+      <span class="data-source">quaternion + velocity</span>
+    </div>
+  </div>
+</div>
+
+<div class="section-title">Time Series / Trail Analysis</div>
+<div class="grid">
+  <div class="card">
+    <canvas id="gForce" width="500" height="340"></canvas>
+    <div class="card-info">
+      <h3>G-Force Heatmap Trail</h3>
+      <p>Trail colored by instantaneous G-load computed from velocity deltas between samples. Blue=1G (straight flight), yellow=2G, red=3G+ (hard turns).</p>
+      <span class="data-source">d(velocity) / dt from trail buffer</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <canvas id="oscillation" width="500" height="340"></canvas>
+    <div class="card-info">
+      <h3>Oscillation Detector</h3>
+      <p>When roll or pitch rapidly alternates sign, that's a PID tuning problem. Trail pulses red/orange at oscillation zones with a warning indicator.</p>
+      <span class="data-source">trail_roll[], trail_pitch[] sign changes</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <canvas id="loiterCircle" width="500" height="340"></canvas>
+    <div class="card-info">
+      <h3>Loiter Circle Detection</h3>
+      <p>Detects when trail forms a repeating circle and draws a fitted guide ring with radius label. Shows how well the controller maintains the commanded loiter radius.</p>
+      <span class="data-source">position history (circular regression)</span>
+    </div>
+  </div>
+</div>
+
+<div class="section-title">HUD Additions</div>
+<div class="grid">
+  <div class="card">
+    <canvas id="flightTimer" width="500" height="340"></canvas>
+    <div class="card-info">
+      <h3>Flight Time Counter</h3>
+      <p>Elapsed sim time from time_usec. Shows total flight duration, arm time, and phase splits (takeoff, cruise, landing).</p>
+      <span class="data-source">time_usec</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <canvas id="peakMarkers" width="500" height="340"></canvas>
+    <div class="card-info">
+      <h3>Max Altitude / Speed Markers</h3>
+      <p>Small flag markers on the trail at peak values — highest point, fastest speed, hardest turn. Quick visual reference for flight envelope.</p>
+      <span class="data-source">max(altitude, speed, g-force) from trail</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <canvas id="minimap" width="500" height="340"></canvas>
+    <div class="card-info">
+      <h3>Top-Down Minimap</h3>
+      <p>2D inset showing the trail from above with North indicator. Useful when the 3D camera is low-angle and the flight path is hard to read spatially.</p>
+      <span class="data-source">position.x, position.z (top-down)</span>
+    </div>
+  </div>
+</div>
+
+<script>
+// Shared utilities
+const TAU = Math.PI * 2;
+function lerp(a, b, t) { return a + (b - a) * t; }
+function lerpColor(c1, c2, t) {
+  return [lerp(c1[0],c2[0],t), lerp(c1[1],c2[1],t), lerp(c1[2],c2[2],t)];
+}
+function rgb(c) { return `rgb(${c[0]|0},${c[1]|0},${c[2]|0})`; }
+function rgba(c, a) { return `rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`; }
+
+function drawGrid(ctx, w, h, opts = {}) {
+  const { perspY = 0.6, color = '#1a2a3a', spacing = 30 } = opts;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 0.5;
+  // Horizontal
+  for (let y = h * perspY; y < h; y += spacing) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+  }
+  // Vertical (converging)
+  const vanishY = h * (perspY - 0.1);
+  for (let x = 0; x <= w; x += spacing) {
+    ctx.beginPath();
+    ctx.moveTo(x, h);
+    ctx.lineTo(lerp(x, w/2, 0.7), vanishY);
+    ctx.stroke();
+  }
+}
+
+function drawDrone(ctx, x, y, size, roll = 0) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(roll);
+  // Body
+  ctx.fillStyle = '#1e3050';
+  ctx.strokeStyle = '#4a7aaa';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, -size);
+  ctx.lineTo(size * 0.7, size * 0.5);
+  ctx.lineTo(-size * 0.7, size * 0.5);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // Canopy
+  ctx.fillStyle = '#0cc8';
+  ctx.beginPath();
+  ctx.arc(0, -size * 0.2, size * 0.25, 0, TAU);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawQuad(ctx, x, y, size, roll = 0) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(roll);
+  const arm = size * 0.8;
+  ctx.strokeStyle = '#4a7aaa';
+  ctx.lineWidth = 2;
+  // Arms
+  ctx.beginPath();
+  ctx.moveTo(-arm, -arm); ctx.lineTo(arm, arm);
+  ctx.moveTo(arm, -arm); ctx.lineTo(-arm, arm);
+  ctx.stroke();
+  // Body
+  ctx.fillStyle = '#1e3050';
+  ctx.beginPath(); ctx.arc(0, 0, size * 0.3, 0, TAU); ctx.fill();
+  ctx.strokeStyle = '#4a7aaa';
+  ctx.stroke();
+  // Motors
+  const mpos = [[-arm,-arm],[arm,-arm],[arm,arm],[-arm,arm]];
+  mpos.forEach(([mx,my], i) => {
+    ctx.fillStyle = i < 2 ? '#ff2f2b' : '#2740c5';
+    ctx.beginPath(); ctx.arc(mx, my, size*0.18, 0, TAU); ctx.fill();
+  });
+  // Nose indicator
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(0, -size*0.45, 3, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+// ─── 1. Velocity Vector Arrow ─────────────────────────────────────────
+(function() {
+  const c = document.getElementById('velocityVector');
+  const ctx = c.getContext('2d');
+  const w = c.width, h = c.height;
+  let t = 0;
+
+  function draw() {
+    ctx.clearRect(0, 0, w, h);
+    drawGrid(ctx, w, h);
+
+    const dx = w/2, dy = h * 0.42;
+    const drift = Math.sin(t * 0.02) * 0.3;
+
+    drawQuad(ctx, dx, dy, 22, drift * 0.5);
+
+    // Nose direction (white)
+    ctx.save();
+    ctx.translate(dx, dy);
+    ctx.rotate(drift * 0.5);
+    ctx.strokeStyle = '#ffffff88';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(0, -30); ctx.lineTo(0, -80); ctx.stroke();
+    ctx.setLineDash([]);
+    // Arrow head
+    ctx.fillStyle = '#fffa';
+    ctx.beginPath(); ctx.moveTo(0, -85); ctx.lineTo(-5, -75); ctx.lineTo(5, -75); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#fff8';
+    ctx.font = '11px monospace';
+    ctx.fillText('NOSE', 10, -65);
+    ctx.restore();
+
+    // Velocity vector (green, different angle)
+    const velAngle = drift * 0.5 + drift * 0.8;
+    ctx.save();
+    ctx.translate(dx, dy);
+    ctx.rotate(velAngle);
+    ctx.strokeStyle = '#0f8';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.moveTo(0, -30); ctx.lineTo(0, -90); ctx.stroke();
+    ctx.fillStyle = '#0f8';
+    ctx.beginPath(); ctx.moveTo(0, -96); ctx.lineTo(-6, -84); ctx.lineTo(6, -84); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#0f8';
+    ctx.font = '11px monospace';
+    ctx.fillText('VEL', 10, -75);
+    ctx.restore();
+
+    // Sideslip arc
+    if (Math.abs(drift) > 0.05) {
+      ctx.save();
+      ctx.translate(dx, dy);
+      const a1 = -Math.PI/2 + drift * 0.5;
+      const a2 = -Math.PI/2 + velAngle;
+      ctx.strokeStyle = '#ff6a0088';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(0, 0, 55, Math.min(a1,a2), Math.max(a1,a2)); ctx.stroke();
+      ctx.fillStyle = '#ff6a00aa';
+      ctx.font = '10px monospace';
+      const ang = Math.abs(drift * 0.3 * 180 / Math.PI).toFixed(1);
+      ctx.fillText(ang + '°', 35, -35);
+      ctx.restore();
+    }
+
+    t++;
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// ─── 2. Ground Track Projection ───────────────────────────────────────
+(function() {
+  const c = document.getElementById('groundTrack');
+  const ctx = c.getContext('2d');
+  const w = c.width, h = c.height;
+  let t = 0;
+
+  function draw() {
+    ctx.clearRect(0, 0, w, h);
+    drawGrid(ctx, w, h);
+
+    const groundY = h * 0.78;
+    const droneX = w/2 + Math.sin(t * 0.015) * 100;
+    const droneY = h * 0.3 + Math.sin(t * 0.025) * 30;
+    const shadowX = droneX;
+
+    // Vertical dashed line
+    ctx.strokeStyle = '#ffffff22';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 5]);
+    ctx.beginPath(); ctx.moveTo(droneX, droneY + 15); ctx.lineTo(shadowX, groundY); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Ground shadow (ellipse)
+    ctx.fillStyle = '#0cc2';
+    ctx.beginPath();
+    ctx.ellipse(shadowX, groundY, 18, 6, 0, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = '#0cc4';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Ground track trail
+    ctx.strokeStyle = '#0cc3';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let i = 0; i < 60; i++) {
+      const tt = t - i * 2;
+      const px = w/2 + Math.sin(tt * 0.015) * 100;
+      const alpha = 1 - i/60;
+      if (i === 0) ctx.moveTo(px, groundY);
+      else ctx.lineTo(px, groundY);
+    }
+    ctx.stroke();
+
+    drawQuad(ctx, droneX, droneY, 18);
+
+    // Label
+    ctx.fillStyle = '#0cc';
+    ctx.font = '10px monospace';
+    ctx.fillText('ground track', shadowX + 22, groundY + 4);
+
+    t++;
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// ─── 3. Altitude Ruler ────────────────────────────────────────────────
+(function() {
+  const c = document.getElementById('altitudeRuler');
+  const ctx = c.getContext('2d');
+  const w = c.width, h = c.height;
+  let t = 0;
+
+  function draw() {
+    ctx.clearRect(0, 0, w, h);
+    drawGrid(ctx, w, h);
+
+    const groundY = h * 0.82;
+    const alt = 30 + Math.sin(t * 0.02) * 20;
+    const droneY = groundY - alt * 3.5;
+    const droneX = w * 0.45;
+
+    // Ruler line
+    ctx.strokeStyle = '#ffcc3388';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(droneX, droneY + 15); ctx.lineTo(droneX, groundY); ctx.stroke();
+
+    // Tick marks every 10m
+    const pxPerM = (groundY - droneY) / alt;
+    for (let m = 0; m <= alt; m += 5) {
+      const ty = groundY - m * pxPerM;
+      const isMajor = m % 10 === 0;
+      ctx.strokeStyle = isMajor ? '#ffcc33aa' : '#ffcc3344';
+      ctx.lineWidth = isMajor ? 1.5 : 0.7;
+      const tw = isMajor ? 10 : 5;
+      ctx.beginPath(); ctx.moveTo(droneX - tw, ty); ctx.lineTo(droneX + tw, ty); ctx.stroke();
+
+      if (isMajor && m > 0) {
+        ctx.fillStyle = '#ffcc33cc';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText(m + 'm', droneX - 14, ty + 3);
+      }
+    }
+    ctx.textAlign = 'left';
+
+    // Current altitude badge
+    ctx.fillStyle = '#ffcc33';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText(alt.toFixed(1) + ' m', droneX + 16, droneY + 5);
+
+    // Ground marker
+    ctx.fillStyle = '#ffcc3344';
+    ctx.fillRect(droneX - 20, groundY, 40, 2);
+    ctx.fillStyle = '#ffcc3366';
+    ctx.font = '9px monospace';
+    ctx.fillText('GND', droneX - 12, groundY + 14);
+
+    drawQuad(ctx, droneX, droneY, 16);
+
+    t++;
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// ─── 4. Speed Ribbon Trail ────────────────────────────────────────────
+(function() {
+  const c = document.getElementById('speedRibbon');
+  const ctx = c.getContext('2d');
+  const w = c.width, h = c.height;
+  let t = 0;
+
+  function draw() {
+    ctx.clearRect(0, 0, w, h);
+    drawGrid(ctx, w, h);
+
+    const cy = h * 0.45;
+    const points = [];
+    for (let i = 0; i < 120; i++) {
+      const tt = t - i * 1.5;
+      const x = w - 40 - i * 3.5;
+      const y = cy + Math.sin(tt * 0.03) * 40 + Math.cos(tt * 0.017) * 20;
+      const speed = 5 + Math.abs(Math.cos(tt * 0.02)) * 20;
+      points.push({ x, y, speed });
+    }
+
+    // Draw ribbon
+    for (let i = 1; i < points.length; i++) {
+      const p = points[i];
+      const thickness = p.speed * 0.3;
+      const speedNorm = (p.speed - 5) / 20;
+      const col = lerpColor([50, 180, 255], [255, 80, 40], speedNorm);
+      const alpha = 1 - i / points.length;
+
+      ctx.strokeStyle = rgba(col, alpha * 0.8);
+      ctx.lineWidth = thickness;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(points[i-1].x, points[i-1].y);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+    }
+
+    // Speed labels
+    const fast = points[20];
+    const slow = points[80];
+    ctx.font = '10px monospace';
+    ctx.fillStyle = '#ff5028cc';
+    ctx.fillText(fast.speed.toFixed(0) + ' m/s', fast.x + 10, fast.y - 12);
+    ctx.fillStyle = '#32b4ffcc';
+    ctx.fillText(slow.speed.toFixed(0) + ' m/s', slow.x + 10, slow.y - 12);
+
+    // Legend
+    ctx.fillStyle = '#888';
+    ctx.font = '10px monospace';
+    ctx.fillText('thin = slow', 20, h - 30);
+    ctx.fillText('wide = fast', 20, h - 16);
+
+    const dp = points[0];
+    drawQuad(ctx, dp.x, dp.y, 14);
+
+    t++;
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// ─── 5. Attitude Ghost Horizon ────────────────────────────────────────
+(function() {
+  const c = document.getElementById('attitudeHorizon');
+  const ctx = c.getContext('2d');
+  const w = c.width, h = c.height;
+  let t = 0;
+
+  function draw() {
+    ctx.clearRect(0, 0, w, h);
+    drawGrid(ctx, w, h);
+
+    const cx = w/2, cy = h * 0.42;
+    const roll = Math.sin(t * 0.025) * 0.5;
+    const pitch = Math.sin(t * 0.018) * 0.3;
+
+    drawQuad(ctx, cx, cy, 20, roll);
+
+    // Horizon disc (offset to the right of drone)
+    const hx = cx + 80, hy = cy - 20;
+    const hr = 40;
+
+    // Outer ring
+    ctx.strokeStyle = '#fff3';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(hx, hy, hr + 2, 0, TAU); ctx.stroke();
+
+    // Clip to circle
+    ctx.save();
+    ctx.beginPath(); ctx.arc(hx, hy, hr, 0, TAU); ctx.clip();
+
+    // Sky/ground split
+    ctx.save();
+    ctx.translate(hx, hy);
+    ctx.rotate(roll);
+    const pitchOffset = pitch * hr * 2;
+    ctx.fillStyle = '#1a3a6a';
+    ctx.fillRect(-hr-5, -hr-5 + pitchOffset, hr*2+10, hr);
+    ctx.fillStyle = '#3a2a1a';
+    ctx.fillRect(-hr-5, pitchOffset - 5, hr*2+10, hr+10);
+    // Horizon line
+    ctx.strokeStyle = '#fff8';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(-hr-5, pitchOffset); ctx.lineTo(hr+5, pitchOffset); ctx.stroke();
+    // Pitch lines
+    ctx.strokeStyle = '#fff3';
+    ctx.lineWidth = 0.7;
+    for (let p = -2; p <= 2; p++) {
+      if (p === 0) continue;
+      const py = pitchOffset + p * 15;
+      ctx.beginPath(); ctx.moveTo(-12, py); ctx.lineTo(12, py); ctx.stroke();
+    }
+    ctx.restore();
+
+    ctx.restore();
+
+    // Center marker
+    ctx.strokeStyle = '#ffcc33';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(hx - 15, hy); ctx.lineTo(hx - 5, hy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(hx + 5, hy); ctx.lineTo(hx + 15, hy); ctx.stroke();
+    ctx.beginPath(); ctx.arc(hx, hy, 2, 0, TAU); ctx.stroke();
+
+    // Bank indicator at top
+    ctx.save();
+    ctx.translate(hx, hy);
+    ctx.rotate(roll);
+    ctx.fillStyle = '#ffcc33';
+    ctx.beginPath(); ctx.moveTo(0, -hr - 5); ctx.lineTo(-4, -hr - 12); ctx.lineTo(4, -hr - 12); ctx.closePath(); ctx.fill();
+    ctx.restore();
+
+    // Labels
+    ctx.fillStyle = '#fff6';
+    ctx.font = '10px monospace';
+    ctx.fillText('R ' + (roll * 180/Math.PI).toFixed(1) + '°', hx + hr + 8, hy - 5);
+    ctx.fillText('P ' + (pitch * 180/Math.PI).toFixed(1) + '°', hx + hr + 8, hy + 10);
+
+    // Connection line
+    ctx.strokeStyle = '#fff1';
+    ctx.lineWidth = 0.5;
+    ctx.setLineDash([2,3]);
+    ctx.beginPath(); ctx.moveTo(cx + 22, cy); ctx.lineTo(hx - hr, hy); ctx.stroke();
+    ctx.setLineDash([]);
+
+    t++;
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// ─── 6. Body Axis Indicators ──────────────────────────────────────────
+(function() {
+  const c = document.getElementById('bodyAxes');
+  const ctx = c.getContext('2d');
+  const w = c.width, h = c.height;
+  let t = 0;
+
+  function draw() {
+    ctx.clearRect(0, 0, w, h);
+    drawGrid(ctx, w, h);
+
+    const cx = w/2, cy = h * 0.42;
+    const roll = Math.sin(t * 0.02) * 0.4;
+    const len = 45;
+
+    drawQuad(ctx, cx, cy, 20, roll);
+
+    // Forward (blue)
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(roll);
+    ctx.strokeStyle = '#4488ff';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -len); ctx.stroke();
+    ctx.fillStyle = '#4488ff';
+    ctx.beginPath(); ctx.moveTo(0, -len - 6); ctx.lineTo(-4, -len + 2); ctx.lineTo(4, -len + 2); ctx.closePath(); ctx.fill();
+    ctx.font = 'bold 11px monospace';
+    ctx.fillText('FWD', 6, -len + 5);
+
+    // Right (red)
+    ctx.strokeStyle = '#ff4444';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(len, 0); ctx.stroke();
+    ctx.fillStyle = '#ff4444';
+    ctx.beginPath(); ctx.moveTo(len + 6, 0); ctx.lineTo(len - 2, -4); ctx.lineTo(len - 2, 4); ctx.closePath(); ctx.fill();
+    ctx.fillText('R', len - 2, -8);
+
+    // Up (green) - foreshortened
+    ctx.strokeStyle = '#44ff44';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-len * 0.5, -len * 0.3); ctx.stroke();
+    ctx.fillStyle = '#44ff44';
+    ctx.font = 'bold 11px monospace';
+    ctx.fillText('UP', -len * 0.5 - 5, -len * 0.3 - 8);
+
+    ctx.restore();
+
+    // Legend
+    ctx.font = '10px monospace';
+    ctx.fillStyle = '#4488ff'; ctx.fillText('Blue = Forward', 20, h - 45);
+    ctx.fillStyle = '#ff4444'; ctx.fillText('Red = Right (Starboard)', 20, h - 30);
+    ctx.fillStyle = '#44ff44'; ctx.fillText('Green = Up', 20, h - 15);
+
+    t++;
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// ─── 7. Angle of Attack ──────────────────────────────────────────────
+(function() {
+  const c = document.getElementById('aoaViz');
+  const ctx = c.getContext('2d');
+  const w = c.width, h = c.height;
+  let t = 0;
+
+  function draw() {
+    ctx.clearRect(0, 0, w, h);
+    drawGrid(ctx, w, h);
+
+    const cx = w * 0.4, cy = h * 0.45;
+    const aoa = Math.sin(t * 0.015) * 18; // degrees
+    const aoaRad = aoa * Math.PI / 180;
+    const noseAngle = -Math.PI/2 + aoaRad * 0.6;
+    const velAngle = -Math.PI/2 - aoaRad * 0.4;
+
+    // Draw fixed-wing shape
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(noseAngle + Math.PI/2);
+    // Wing
+    ctx.fillStyle = '#1e3050';
+    ctx.strokeStyle = '#4a7aaa';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, -25);
+    ctx.lineTo(35, 5);
+    ctx.lineTo(35, 10);
+    ctx.lineTo(0, 5);
+    ctx.lineTo(-35, 10);
+    ctx.lineTo(-35, 5);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    // Fuselage
+    ctx.beginPath();
+    ctx.moveTo(0, -30);
+    ctx.lineTo(5, 20);
+    ctx.lineTo(-5, 20);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+
+    // Nose line
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.strokeStyle = '#fff8';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3,3]);
+    const nl = 70;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(noseAngle) * 30, Math.sin(noseAngle) * 30);
+    ctx.lineTo(Math.cos(noseAngle) * nl, Math.sin(noseAngle) * nl);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Velocity line
+    ctx.strokeStyle = '#0f8';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(velAngle) * 30, Math.sin(velAngle) * 30);
+    ctx.lineTo(Math.cos(velAngle) * nl, Math.sin(velAngle) * nl);
+    ctx.stroke();
+    // Arrow
+    ctx.fillStyle = '#0f8';
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(velAngle) * (nl+6), Math.sin(velAngle) * (nl+6));
+    ctx.lineTo(Math.cos(velAngle-0.15) * (nl-4), Math.sin(velAngle-0.15) * (nl-4));
+    ctx.lineTo(Math.cos(velAngle+0.15) * (nl-4), Math.sin(velAngle+0.15) * (nl-4));
+    ctx.closePath(); ctx.fill();
+
+    // AoA arc
+    const arcR = 50;
+    const criticalAoA = 15;
+    const danger = Math.min(Math.abs(aoa) / criticalAoA, 1);
+    const col = lerpColor([80, 200, 255], [255, 40, 40], danger);
+    ctx.strokeStyle = rgba(col, 0.8);
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, arcR, Math.min(noseAngle, velAngle), Math.max(noseAngle, velAngle));
+    ctx.stroke();
+
+    // AoA label
+    ctx.fillStyle = rgb(col);
+    ctx.font = 'bold 14px monospace';
+    const labelAngle = (noseAngle + velAngle) / 2;
+    ctx.fillText('AoA: ' + Math.abs(aoa).toFixed(1) + '°',
+      Math.cos(labelAngle) * (arcR + 25) + 10,
+      Math.sin(labelAngle) * (arcR + 25));
+
+    // Stall warning
+    if (Math.abs(aoa) > 12) {
+      ctx.fillStyle = t % 30 < 15 ? '#ff2020' : '#ff202066';
+      ctx.font = 'bold 13px monospace';
+      ctx.fillText('STALL WARNING', 50, -60);
+    }
+
+    ctx.restore();
+
+    // Critical angle indicator bar
+    const barX = w - 60, barY = 40, barH = h - 80;
+    ctx.fillStyle = '#ffffff11';
+    ctx.fillRect(barX, barY, 20, barH);
+    // Fill
+    const fillH = (Math.abs(aoa) / 20) * barH;
+    const grad = ctx.createLinearGradient(0, barY + barH, 0, barY);
+    grad.addColorStop(0, '#50c8ff');
+    grad.addColorStop(0.6, '#ffcc33');
+    grad.addColorStop(1, '#ff2020');
+    ctx.fillStyle = grad;
+    ctx.fillRect(barX, barY + barH - fillH, 20, fillH);
+    // Critical line
+    const critY = barY + barH - (criticalAoA / 20) * barH;
+    ctx.strokeStyle = '#ff4040';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3,2]);
+    ctx.beginPath(); ctx.moveTo(barX - 5, critY); ctx.lineTo(barX + 25, critY); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#ff4040';
+    ctx.font = '9px monospace';
+    ctx.fillText('CRIT', barX - 5, critY - 5);
+
+    t++;
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// ─── 8. G-Force Heatmap Trail ────────────────────────────────────────
+(function() {
+  const c = document.getElementById('gForce');
+  const ctx = c.getContext('2d');
+  const w = c.width, h = c.height;
+  let t = 0;
+
+  function draw() {
+    ctx.clearRect(0, 0, w, h);
+    drawGrid(ctx, w, h);
+
+    const cy = h * 0.45;
+    const points = [];
+    for (let i = 0; i < 150; i++) {
+      const tt = t - i;
+      const x = w - 30 - i * 3;
+      const y = cy + Math.sin(tt * 0.04) * 50 * Math.sin(tt * 0.008);
+      points.push({ x, y });
+    }
+
+    // Compute g-force (acceleration = change in velocity)
+    for (let i = 1; i < points.length - 1; i++) {
+      const ax = (points[i-1].x - 2*points[i].x + points[i+1].x);
+      const ay = (points[i-1].y - 2*points[i].y + points[i+1].y);
+      points[i].g = Math.sqrt(ax*ax + ay*ay) * 2;
+    }
+    points[0].g = points[1].g || 0;
+    points[points.length-1].g = points[points.length-2].g || 0;
+
+    // Draw trail
+    for (let i = 1; i < points.length; i++) {
+      const g = points[i].g;
+      const gNorm = Math.min(g / 8, 1);
+      let col;
+      if (gNorm < 0.33) col = lerpColor([60, 140, 255], [60, 255, 120], gNorm * 3);
+      else if (gNorm < 0.66) col = lerpColor([60, 255, 120], [255, 220, 40], (gNorm - 0.33) * 3);
+      else col = lerpColor([255, 220, 40], [255, 40, 40], (gNorm - 0.66) * 3);
+
+      const alpha = 1 - i / points.length;
+      ctx.strokeStyle = rgba(col, alpha);
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(points[i-1].x, points[i-1].y);
+      ctx.lineTo(points[i].x, points[i].y);
+      ctx.stroke();
+    }
+
+    drawQuad(ctx, points[0].x, points[0].y, 12);
+
+    // Legend
+    const lx = 20, ly = 30;
+    const colors = [[60,140,255],[60,255,120],[255,220,40],[255,40,40]];
+    const labels = ['1G', '2G', '3G', '4G+'];
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = rgb(colors[i]);
+      ctx.fillRect(lx, ly + i * 16, 12, 10);
+      ctx.fillStyle = '#ccc';
+      ctx.font = '10px monospace';
+      ctx.fillText(labels[i], lx + 18, ly + i * 16 + 9);
+    }
+
+    t++;
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// ─── 9. Oscillation Detector ─────────────────────────────────────────
+(function() {
+  const c = document.getElementById('oscillation');
+  const ctx = c.getContext('2d');
+  const w = c.width, h = c.height;
+  let t = 0;
+
+  function draw() {
+    ctx.clearRect(0, 0, w, h);
+    drawGrid(ctx, w, h);
+
+    const cy = h * 0.45;
+    const points = [];
+    for (let i = 0; i < 150; i++) {
+      const tt = t - i;
+      const x = w - 30 - i * 3;
+      // Smooth flight with oscillation zone in the middle
+      let y = cy;
+      const phase = i / 150;
+      if (phase > 0.3 && phase < 0.6) {
+        // Oscillation zone
+        y += Math.sin(tt * 0.3) * 25 * (1 - Math.abs(phase - 0.45) * 6);
+      }
+      y += Math.sin(tt * 0.02) * 20;
+      const roll = phase > 0.3 && phase < 0.6 ? Math.sin(tt * 0.3) * 30 : Math.sin(tt * 0.02) * 5;
+      points.push({ x, y, roll });
+    }
+
+    // Detect oscillation (rapid sign changes in roll)
+    for (let i = 2; i < points.length; i++) {
+      let signChanges = 0;
+      for (let j = Math.max(0, i-8); j < i; j++) {
+        if (points[j].roll * points[j+1].roll < 0) signChanges++;
+      }
+      points[i].oscillating = signChanges >= 3;
+    }
+
+    // Draw trail
+    for (let i = 1; i < points.length; i++) {
+      const osc = points[i].oscillating;
+      const alpha = 1 - i / points.length;
+      if (osc) {
+        ctx.strokeStyle = rgba([255, 60, 20], alpha);
+        ctx.lineWidth = 3;
+      } else {
+        ctx.strokeStyle = rgba([80, 200, 255], alpha);
+        ctx.lineWidth = 2;
+      }
+      ctx.beginPath();
+      ctx.moveTo(points[i-1].x, points[i-1].y);
+      ctx.lineTo(points[i].x, points[i].y);
+      ctx.stroke();
+    }
+
+    // Oscillation zone highlight
+    let oscStart = -1, oscEnd = -1;
+    for (let i = 0; i < points.length; i++) {
+      if (points[i].oscillating) {
+        if (oscStart < 0) oscStart = i;
+        oscEnd = i;
+      }
+    }
+    if (oscStart >= 0) {
+      const x1 = points[oscEnd].x - 10;
+      const x2 = points[oscStart].x + 10;
+      ctx.fillStyle = '#ff20100a';
+      ctx.fillRect(x1, 0, x2 - x1, h);
+
+      // Warning badge
+      const badgeX = (points[oscStart].x + points[oscEnd].x) / 2;
+      if (t % 40 < 25) {
+        ctx.fillStyle = '#ff4020cc';
+        ctx.font = 'bold 12px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('PID OSCILLATION', badgeX, 30);
+        ctx.font = '10px monospace';
+        ctx.fillStyle = '#ff8060';
+        ctx.fillText('rapid roll sign changes detected', badgeX, 46);
+        ctx.textAlign = 'left';
+      }
+    }
+
+    drawQuad(ctx, points[0].x, points[0].y, 12, points[0].roll * 0.01);
+
+    // Legend
+    ctx.font = '10px monospace';
+    ctx.fillStyle = '#50c8ff'; ctx.fillText('Normal flight', 20, h - 30);
+    ctx.fillStyle = '#ff3c14'; ctx.fillText('Oscillation detected', 20, h - 15);
+
+    t++;
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// ─── 10. Loiter Circle Detection ─────────────────────────────────────
+(function() {
+  const c = document.getElementById('loiterCircle');
+  const ctx = c.getContext('2d');
+  const w = c.width, h = c.height;
+  let t = 0;
+
+  function draw() {
+    ctx.clearRect(0, 0, w, h);
+
+    // Top-down view grid
+    ctx.strokeStyle = '#1a2a3a';
+    ctx.lineWidth = 0.5;
+    for (let x = 0; x < w; x += 30) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+    }
+    for (let y = 0; y < h; y += 30) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    }
+
+    const cx = w * 0.45, cy = h * 0.48;
+    const radius = 90;
+    const wobble = 8;
+
+    // Fitted circle (ideal)
+    ctx.strokeStyle = '#0cc4';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath(); ctx.arc(cx, cy, radius, 0, TAU); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Center cross
+    ctx.strokeStyle = '#0cc6';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cx - 8, cy); ctx.lineTo(cx + 8, cy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx, cy - 8); ctx.lineTo(cx, cy + 8); ctx.stroke();
+
+    // Actual trail (with wobble)
+    const trail = [];
+    for (let i = 0; i < 200; i++) {
+      const angle = (t - i) * 0.02;
+      const r = radius + Math.sin(angle * 3.7) * wobble + Math.cos(angle * 2.3) * wobble * 0.5;
+      trail.push({
+        x: cx + Math.cos(angle) * r,
+        y: cy + Math.sin(angle) * r
+      });
+    }
+
+    for (let i = 1; i < trail.length; i++) {
+      const alpha = 1 - i / trail.length;
+      ctx.strokeStyle = rgba([255, 200, 50], alpha * 0.8);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(trail[i-1].x, trail[i-1].y);
+      ctx.lineTo(trail[i].x, trail[i].y);
+      ctx.stroke();
+    }
+
+    // Drone
+    const droneAngle = t * 0.02;
+    const droneR = radius + Math.sin(droneAngle * 3.7) * wobble;
+    const dx = cx + Math.cos(droneAngle) * droneR;
+    const dy = cy + Math.sin(droneAngle) * droneR;
+    drawQuad(ctx, dx, dy, 10, droneAngle + Math.PI/2);
+
+    // Radius line
+    ctx.strokeStyle = '#0cc8';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(dx, dy); ctx.stroke();
+
+    // Radius label
+    const midX = (cx + dx) / 2, midY = (cy + dy) / 2;
+    ctx.fillStyle = '#0cc';
+    ctx.font = 'bold 12px monospace';
+    ctx.fillText('R: ' + radius + 'm', midX + 8, midY - 8);
+
+    // Deviation indicator
+    const actualR = Math.sqrt((dx-cx)**2 + (dy-cy)**2);
+    const dev = actualR - radius;
+    ctx.fillStyle = Math.abs(dev) > 5 ? '#ff8040' : '#0cc';
+    ctx.font = '11px monospace';
+    ctx.fillText('dev: ' + (dev > 0 ? '+' : '') + dev.toFixed(1) + 'm', w - 130, 30);
+
+    // North arrow
+    ctx.fillStyle = '#fff8';
+    ctx.beginPath(); ctx.moveTo(30, 25); ctx.lineTo(26, 40); ctx.lineTo(34, 40); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#fff6';
+    ctx.font = '10px monospace';
+    ctx.fillText('N', 26, 20);
+
+    t++;
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// ─── 11. Flight Time Counter ─────────────────────────────────────────
+(function() {
+  const c = document.getElementById('flightTimer');
+  const ctx = c.getContext('2d');
+  const w = c.width, h = c.height;
+  let t = 0;
+
+  function draw() {
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#0f0f23';
+    ctx.fillRect(0, 0, w, h);
+
+    // Simulate HUD overlay
+    const simTime = t * 0.5; // seconds
+    const mins = Math.floor(simTime / 60);
+    const secs = Math.floor(simTime % 60);
+    const ms = Math.floor((simTime % 1) * 10);
+
+    // Main timer
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 36px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}.${ms}`, w/2, 80);
+
+    ctx.fillStyle = '#888';
+    ctx.font = '12px monospace';
+    ctx.fillText('FLIGHT TIME', w/2, 100);
+
+    // Phase breakdown
+    const phases = [
+      { name: 'ARM', start: 0, end: 5, color: '#888' },
+      { name: 'TAKEOFF', start: 5, end: 12, color: '#0cc' },
+      { name: 'CRUISE', start: 12, end: simTime > 40 ? 40 : simTime, color: '#0f8' },
+      { name: 'LOITER', start: 40, end: simTime > 55 ? 55 : Math.max(40, simTime), color: '#ffcc33' },
+      { name: 'LAND', start: 55, end: Math.max(55, simTime), color: '#ff6a00' },
+    ];
+
+    const barY = 140, barH = 24, barW = w - 80;
+    const totalTime = Math.max(simTime, 65);
+
+    ctx.textAlign = 'left';
+    phases.forEach(p => {
+      if (simTime < p.start) return;
+      const x1 = 40 + (p.start / totalTime) * barW;
+      const x2 = 40 + (Math.min(p.end, simTime) / totalTime) * barW;
+      ctx.fillStyle = p.color + '44';
+      ctx.fillRect(x1, barY, x2 - x1, barH);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(x1, barY, 2, barH);
+
+      if (x2 - x1 > 30) {
+        ctx.fillStyle = p.color;
+        ctx.font = '9px monospace';
+        ctx.fillText(p.name, x1 + 6, barY + 15);
+      }
+    });
+
+    // Current position marker
+    const curX = 40 + (simTime / totalTime) * barW;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.moveTo(curX, barY - 4); ctx.lineTo(curX - 4, barY - 10); ctx.lineTo(curX + 4, barY - 10); ctx.closePath(); ctx.fill();
+
+    // Time marks
+    ctx.fillStyle = '#666';
+    ctx.font = '9px monospace';
+    for (let s = 0; s <= totalTime; s += 10) {
+      const mx = 40 + (s / totalTime) * barW;
+      ctx.fillRect(mx, barY + barH, 1, 4);
+      ctx.fillText(s + 's', mx - 6, barY + barH + 16);
+    }
+
+    // Stats
+    const stats = [
+      { label: 'Arm Time', value: '0:05', y: 210 },
+      { label: 'Time to Alt', value: '0:12', y: 230 },
+      { label: 'Cruise Duration', value: mins > 0 ? `${mins}:${String(Math.max(0,secs-12)).padStart(2,'0')}` : '--:--', y: 250 },
+    ];
+    ctx.textAlign = 'left';
+    stats.forEach(s => {
+      ctx.fillStyle = '#888';
+      ctx.font = '11px monospace';
+      ctx.fillText(s.label, 60, s.y);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(s.value, 200, s.y);
+    });
+
+    // time_usec raw
+    ctx.fillStyle = '#444';
+    ctx.font = '9px monospace';
+    ctx.fillText('time_usec: ' + Math.floor(simTime * 1e6).toLocaleString(), 60, 290);
+
+    ctx.textAlign = 'left';
+    t++;
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// ─── 12. Peak Markers ────────────────────────────────────────────────
+(function() {
+  const c = document.getElementById('peakMarkers');
+  const ctx = c.getContext('2d');
+  const w = c.width, h = c.height;
+  let t = 0;
+
+  function draw() {
+    ctx.clearRect(0, 0, w, h);
+    drawGrid(ctx, w, h);
+
+    const points = [];
+    let maxAlt = { val: -Infinity, idx: 0 };
+    let maxSpd = { val: -Infinity, idx: 0 };
+
+    for (let i = 0; i < 150; i++) {
+      const tt = t - i * 1.2;
+      const x = w - 30 - i * 3;
+      const altitude = 40 + Math.sin(tt * 0.02) * 35 + Math.sin(tt * 0.007) * 15;
+      const y = h * 0.8 - altitude * 2;
+      const speed = 5 + Math.abs(Math.cos(tt * 0.025)) * 18;
+      points.push({ x, y, altitude, speed });
+
+      if (altitude > maxAlt.val) { maxAlt = { val: altitude, idx: i }; }
+      if (speed > maxSpd.val) { maxSpd = { val: speed, idx: i }; }
+    }
+
+    // Draw trail
+    for (let i = 1; i < points.length; i++) {
+      const alpha = 1 - i / points.length;
+      ctx.strokeStyle = rgba([255, 200, 50], alpha * 0.7);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(points[i-1].x, points[i-1].y);
+      ctx.lineTo(points[i].x, points[i].y);
+      ctx.stroke();
+    }
+
+    // Max altitude flag
+    const ma = points[maxAlt.idx];
+    ctx.strokeStyle = '#0cc';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(ma.x, ma.y - 15); ctx.lineTo(ma.x, ma.y - 45); ctx.stroke();
+    // Flag
+    ctx.fillStyle = '#0cc';
+    ctx.beginPath();
+    ctx.moveTo(ma.x, ma.y - 45);
+    ctx.lineTo(ma.x + 30, ma.y - 40);
+    ctx.lineTo(ma.x, ma.y - 35);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 8px monospace';
+    ctx.fillText('ALT', ma.x + 4, ma.y - 38);
+    ctx.fillStyle = '#0cc';
+    ctx.font = '10px monospace';
+    ctx.fillText(ma.val.toFixed(1) + 'm', ma.x + 4, ma.y - 50);
+
+    // Max speed flag
+    const ms = points[maxSpd.idx];
+    ctx.strokeStyle = '#ff6a00';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(ms.x, ms.y + 15); ctx.lineTo(ms.x, ms.y + 45); ctx.stroke();
+    ctx.fillStyle = '#ff6a00';
+    ctx.beginPath();
+    ctx.moveTo(ms.x, ms.y + 45);
+    ctx.lineTo(ms.x + 30, ms.y + 40);
+    ctx.lineTo(ms.x, ms.y + 35);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 8px monospace';
+    ctx.fillText('SPD', ms.x + 4, ms.y + 42);
+    ctx.fillStyle = '#ff6a00';
+    ctx.font = '10px monospace';
+    ctx.fillText(ms.val.toFixed(1) + ' m/s', ms.x + 4, ms.y + 58);
+
+    // Pulsing dots at peaks
+    const pulse = 0.5 + Math.sin(t * 0.1) * 0.5;
+    ctx.fillStyle = rgba([0, 204, 204], pulse);
+    ctx.beginPath(); ctx.arc(ma.x, ma.y, 5, 0, TAU); ctx.fill();
+    ctx.fillStyle = rgba([255, 106, 0], pulse);
+    ctx.beginPath(); ctx.arc(ms.x, ms.y, 5, 0, TAU); ctx.fill();
+
+    drawQuad(ctx, points[0].x, points[0].y, 12);
+
+    t++;
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// ─── 13. Minimap ─────────────────────────────────────────────────────
+(function() {
+  const c = document.getElementById('minimap');
+  const ctx = c.getContext('2d');
+  const w = c.width, h = c.height;
+  let t = 0;
+
+  function draw() {
+    ctx.clearRect(0, 0, w, h);
+
+    // "Main 3D view" background
+    drawGrid(ctx, w, h, { perspY: 0.5 });
+    ctx.fillStyle = '#fff3';
+    ctx.font = '14px monospace';
+    ctx.fillText('3D View (low angle camera)', 20, 30);
+
+    // Draw a fake low-angle trail (hard to read)
+    for (let i = 0; i < 80; i++) {
+      const tt = t - i * 2;
+      const x = w/2 + Math.sin(tt * 0.015) * 120;
+      const y = h * 0.5 + i * 0.5 + Math.cos(tt * 0.01) * 10;
+      if (i > 0) {
+        const alpha = 1 - i/80;
+        ctx.strokeStyle = rgba([255,200,50], alpha * 0.3);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        const px = w/2 + Math.sin((tt+2) * 0.015) * 120;
+        const py = h * 0.5 + (i-1) * 0.5 + Math.cos((tt+2) * 0.01) * 10;
+        ctx.moveTo(px, py); ctx.lineTo(x, y);
+        ctx.stroke();
+      }
+    }
+
+    // Minimap inset (top-right)
+    const mx = w - 170, my = 20, mw = 150, mh = 150;
+
+    // Background
+    ctx.fillStyle = '#0a0a1acc';
+    ctx.fillRect(mx, my, mw, mh);
+    ctx.strokeStyle = '#0cc6';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(mx, my, mw, mh);
+
+    // Minimap grid
+    ctx.strokeStyle = '#1a2a3a';
+    ctx.lineWidth = 0.5;
+    for (let x = mx; x <= mx + mw; x += 15) {
+      ctx.beginPath(); ctx.moveTo(x, my); ctx.lineTo(x, my + mh); ctx.stroke();
+    }
+    for (let y = my; y <= my + mh; y += 15) {
+      ctx.beginPath(); ctx.moveTo(mx, y); ctx.lineTo(mx + mw, y); ctx.stroke();
+    }
+
+    // Trail on minimap (top-down, clear)
+    const mcx = mx + mw/2, mcy = my + mh/2;
+    for (let i = 1; i < 120; i++) {
+      const tt = t - i * 2;
+      const px = mcx + Math.sin(tt * 0.015) * 50;
+      const py = mcy + Math.cos(tt * 0.01) * 40;
+      const ppx = mcx + Math.sin((tt+2) * 0.015) * 50;
+      const ppy = mcy + Math.cos((tt+2) * 0.01) * 40;
+      const alpha = 1 - i/120;
+      ctx.strokeStyle = rgba([255,200,50], alpha * 0.8);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(ppx, ppy); ctx.lineTo(px, py); ctx.stroke();
+    }
+
+    // Drone position on minimap
+    const dpx = mcx + Math.sin(t * 0.03) * 50;
+    const dpy = mcy + Math.cos(t * 0.02) * 40;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(dpx, dpy, 3, 0, TAU); ctx.fill();
+    // Heading indicator
+    const headAngle = t * 0.03 + Math.PI;
+    ctx.strokeStyle = '#0cc';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(dpx, dpy);
+    ctx.lineTo(dpx + Math.cos(headAngle) * 10, dpy + Math.sin(headAngle) * 10);
+    ctx.stroke();
+
+    // North arrow
+    ctx.fillStyle = '#ff4040';
+    ctx.beginPath();
+    ctx.moveTo(mx + 10, my + 8);
+    ctx.lineTo(mx + 7, my + 18);
+    ctx.lineTo(mx + 13, my + 18);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ff4040';
+    ctx.font = '8px monospace';
+    ctx.fillText('N', mx + 7, my + 28);
+
+    // Scale
+    ctx.strokeStyle = '#fff6';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(mx + mw - 40, my + mh - 10); ctx.lineTo(mx + mw - 10, my + mh - 10); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(mx + mw - 40, my + mh - 13); ctx.lineTo(mx + mw - 40, my + mh - 7); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(mx + mw - 10, my + mh - 13); ctx.lineTo(mx + mw - 10, my + mh - 7); ctx.stroke();
+    ctx.fillStyle = '#fff6';
+    ctx.font = '8px monospace';
+    ctx.fillText('50m', mx + mw - 37, my + mh - 16);
+
+    // Label
+    ctx.fillStyle = '#0cc';
+    ctx.font = '9px monospace';
+    ctx.fillText('TOP-DOWN', mx + mw/2 - 25, my + mh + 14);
+
+    t++;
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+</script>
+
+</body>
+</html>

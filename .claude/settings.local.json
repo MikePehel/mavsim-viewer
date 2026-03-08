@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(taskkill:*)",
+      "Bash(\"C:/Program Files \\(x86\\)/Microsoft Visual Studio/18/BuildTools/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe\":*)",
+      "Bash(./build/Release/mavsim-viewer.exe:*)",
+      "WebSearch",
+      "WebFetch(domain:www.shadertoy.com)",
+      "WebFetch(domain:gameishard.gg)",
+      "WebFetch(domain:nathanpointer.com)",
+      "WebFetch(domain:synpop.com)",
+      "WebFetch(domain:www.aesdes.org)",
+      "Bash(for f in quadrotor.obj quad_fpv.obj hexacopter.obj)",
+      "Bash(do echo \"=== $f ===\")",
+      "Read(//c/Users/micha/Documents/mavsim-viewer/models/**)",
+      "Bash(done)",
+      "Bash(cp:*)",
+      "Read(//c/Users/micha/Documents/mavsim-viewer/**)",
+      "Bash(git fetch:*)",
+      "Bash(git reset:*)",
+      "Bash(gh pr:*)",
+      "Bash(for f in models/px4_quadrotor.obj models/fpv_quadrotor.obj models/px4_hexarotor.obj models/vtol_wing.obj models/cessna.obj models/x_vert.obj)",
+      "Bash(ls:*)"
+    ]
+  }
+}
