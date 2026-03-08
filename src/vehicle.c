@@ -10,8 +10,8 @@
 #include <stdlib.h>
 
 #define EARTH_RADIUS 6371000.0
-#define TRAIL_MAX 1200
-#define TRAIL_INTERVAL 0.05f
+#define TRAIL_MAX 3600
+#define TRAIL_INTERVAL 0.016f
 #define TRAIL_DIST_INTERVAL 0.01f  // meters between ribbon samples
 
 // ── Model registry ──────────────────────────────────────────────────────────
@@ -413,9 +413,13 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
         }
       } else {
         // ── Speed ribbon trail (mode 2) ──
+        // Precompute per-vertex perpendicular by averaging adjacent segment
+        // directions so ribbon edges flow smoothly at joints.
         float max_speed = v->trail_speed_max > 1.0f ? v->trail_speed_max : 1.0f;
         float max_half_w = v->model_scale * 0.25f;
         float min_half_w = 0.02f;
+        Vector3 prev_perp = {0};
+        bool have_prev = false;
 
         for (int i = 1; i < v->trail_count; i++) {
             int idx0 = (start + i - 1) % v->trail_capacity;
@@ -431,20 +435,40 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
             if (seg_len < 0.001f) continue;
             Vector3 dir = { seg.x/seg_len, seg.y/seg_len, seg.z/seg_len };
 
-            Vector3 up = { 0, 1, 0 };
-            Vector3 perp = { dir.z * up.y - dir.y * up.z,
-                             dir.x * up.z - dir.z * up.x,
-                             dir.y * up.x - dir.x * up.y };
+            // Compute perpendicular: use world-up cross for horizontal flight,
+            // camera-based billboard for vertical flight
+            float vert = fabsf(dir.y);
+            Vector3 perp;
+            if (vert < 0.7f) {
+                // Mostly horizontal: cross with world up
+                Vector3 up = { 0, 1, 0 };
+                perp = (Vector3){ dir.z * up.y - dir.y * up.z,
+                                  dir.x * up.z - dir.z * up.x,
+                                  dir.y * up.x - dir.x * up.y };
+            } else {
+                // Mostly vertical: cross with world forward (Z)
+                Vector3 fwd = { 0, 0, 1 };
+                perp = (Vector3){ dir.y * fwd.z - dir.z * fwd.y,
+                                  dir.z * fwd.x - dir.x * fwd.z,
+                                  dir.x * fwd.y - dir.y * fwd.x };
+            }
             float plen = sqrtf(perp.x*perp.x + perp.y*perp.y + perp.z*perp.z);
             if (plen < 0.001f) {
-                Vector3 to_cam = { cam_pos.x - p0.x, cam_pos.y - p0.y, cam_pos.z - p0.z };
-                perp = (Vector3){ dir.y * to_cam.z - dir.z * to_cam.y,
-                                  dir.z * to_cam.x - dir.x * to_cam.z,
-                                  dir.x * to_cam.y - dir.y * to_cam.x };
-                plen = sqrtf(perp.x*perp.x + perp.y*perp.y + perp.z*perp.z);
-                if (plen < 0.001f) continue;
+                if (have_prev) { perp = prev_perp; }
+                else continue;
+            } else {
+                perp.x /= plen; perp.y /= plen; perp.z /= plen;
             }
-            perp.x /= plen; perp.y /= plen; perp.z /= plen;
+
+            // Ensure consistent orientation (don't flip side-to-side)
+            if (have_prev) {
+                float dot = perp.x*prev_perp.x + perp.y*prev_perp.y + perp.z*prev_perp.z;
+                if (dot < 0.0f) {
+                    perp.x = -perp.x; perp.y = -perp.y; perp.z = -perp.z;
+                }
+            }
+            prev_perp = perp;
+            have_prev = true;
 
             // Power law width: stays thin longer, ramps at high speed
             float s0 = spd0 / max_speed; if (s0 > 1.0f) s0 = 1.0f;
