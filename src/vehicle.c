@@ -91,7 +91,29 @@ void vehicle_cycle_model(vehicle_t *v) {
 static Color heat_to_color(float heat, unsigned char alpha, view_mode_t mode) {
     float cr, cg, cb;
 
-    if (mode == VIEW_1988) {
+    if (mode == VIEW_SNOW) {
+        // Snow: deep navy → royal blue → teal → green → yellow → red
+        // Bold saturated colors visible on bright white background
+        if (heat < 0.16f) {
+            float s = heat / 0.16f;
+            cr = 10 + 10 * s; cg = 20 + 20 * s; cb = 100 + 40 * s;
+        } else if (heat < 0.33f) {
+            float s = (heat - 0.16f) / 0.17f;
+            cr = 20 - 10 * s; cg = 40 + 80 * s; cb = 140 + 40 * s;
+        } else if (heat < 0.5f) {
+            float s = (heat - 0.33f) / 0.17f;
+            cr = 10 - 10 * s; cg = 120 + 40 * s; cb = 180 - 100 * s;
+        } else if (heat < 0.66f) {
+            float s = (heat - 0.5f) / 0.16f;
+            cr = 0 + 60 * s; cg = 160 + 40 * s; cb = 80 - 80 * s;
+        } else if (heat < 0.83f) {
+            float s = (heat - 0.66f) / 0.17f;
+            cr = 60 + 180 * s; cg = 200 + 20 * s; cb = 0;
+        } else {
+            float s = (heat - 0.83f) / 0.17f;
+            cr = 240; cg = 220 - 180 * s; cb = 0;
+        }
+    } else if (mode == VIEW_1988) {
         // 1988: neon pink → hot magenta → red → orange → yellow → white
         if (heat < 0.16f) {
             float s = heat / 0.16f;
@@ -278,13 +300,15 @@ void vehicle_update(vehicle_t *v, const hil_state_t *state) {
 
 void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
                   int trail_mode, bool show_ground_track, Vector3 cam_pos) {
-    // In Rez/1988 mode, swap red arm color
+    // In Rez/1988/Snow mode, swap red arm color
     Color saved_red = {0};
-    if ((view_mode == VIEW_REZ || view_mode == VIEW_1988) && v->red_material_idx >= 0) {
+    if ((view_mode == VIEW_REZ || view_mode == VIEW_1988 || view_mode == VIEW_SNOW) && v->red_material_idx >= 0) {
         Color *c = &v->model.materials[v->red_material_idx].maps[MATERIAL_MAP_DIFFUSE].color;
         saved_red = *c;
         if (view_mode == VIEW_1988)
             *c = (Color){ 255, 20, 100, 255 }; // hot pink
+        else if (view_mode == VIEW_SNOW)
+            *c = (Color){ 200, 30, 30, 255 }; // bold red on white
         else
             *c = (Color){ 255, 106, 0, 255 }; // #ff6a00 orange
     }
@@ -321,7 +345,14 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
         // ── Normal directional trail ──
         Color trail_color;
         Color col_back, col_up, col_down, col_roll_pos, col_roll_neg;
-        if (view_mode == VIEW_1988) {
+        if (view_mode == VIEW_SNOW) {
+            trail_color  = (Color){  20,  80, 200, 200 };
+            col_back     = (Color){ 140,  20, 200, 255 };
+            col_up       = (Color){   0, 150,  60, 255 };
+            col_down     = (Color){ 200,  50,   0, 255 };
+            col_roll_pos = (Color){  20, 160,  40, 255 };
+            col_roll_neg = (Color){ 200,  20,  60, 255 };
+        } else if (view_mode == VIEW_1988) {
             trail_color  = (Color){ 255, 220,  60, 160 };
             col_back     = (Color){ 180,  40, 255, 255 };
             col_up       = (Color){   0, 240, 255, 255 };
@@ -480,7 +511,11 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
         Color drop;
 
         Color fill_col, edge_col;
-        if (view_mode == VIEW_GRID) {
+        if (view_mode == VIEW_SNOW) {
+            fill_col = (Color){ 30, 30, 40, 60 };
+            edge_col = (Color){ 20, 20, 25, 160 };
+            drop = (Color){ 20, 20, 25, 80 };
+        } else if (view_mode == VIEW_GRID) {
             fill_col = (Color){ 0, 0, 0, 50 };
             edge_col = (Color){ 60, 60, 60, 80 };
             drop = (Color){ 150, 150, 150, 40 };
@@ -530,7 +565,7 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
     }
 
     // Restore original color
-    if ((view_mode == VIEW_REZ || view_mode == VIEW_1988) && v->red_material_idx >= 0) {
+    if ((view_mode == VIEW_REZ || view_mode == VIEW_1988 || view_mode == VIEW_SNOW) && v->red_material_idx >= 0) {
         v->model.materials[v->red_material_idx].maps[MATERIAL_MAP_DIFFUSE].color = saved_red;
     }
 }

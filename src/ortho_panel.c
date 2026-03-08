@@ -57,9 +57,11 @@ void ortho_panel_render(ortho_panel_t *op, const scene_t *s,
                         const vehicle_t *vehicles, int vehicle_count,
                         int selected, view_mode_t view_mode, int trail_mode)
 {
+    bool is_snow = (view_mode == VIEW_SNOW);
+
     for (int v = 0; v < ORTHO_VIEW_COUNT; v++) {
         BeginTextureMode(op->targets[v]);
-            ClearBackground((Color){ 10, 10, 18, 255 });
+            ClearBackground(is_snow ? (Color){ 238, 240, 243, 255 } : (Color){ 10, 10, 18, 255 });
             BeginMode3D(op->cameras[v]);
                 scene_draw(s);
 
@@ -70,8 +72,8 @@ void ortho_panel_render(ortho_panel_t *op, const scene_t *s,
                 else if (op->ortho_span > 80.0f) spacing = 20.0f;
                 else if (op->ortho_span < 20.0f) spacing = 2.0f;
 
-                Color grid_minor = { 40, 40, 55, 60 };
-                Color grid_major = { 60, 60, 80, 100 };
+                Color grid_minor = is_snow ? (Color){ 170, 175, 185, 80 } : (Color){ 40, 40, 55, 60 };
+                Color grid_major = is_snow ? (Color){ 100, 105, 115, 140 } : (Color){ 60, 60, 80, 100 };
 
                 Vector3 center = op->cameras[v].target;
 
@@ -129,7 +131,7 @@ void ortho_panel_render(ortho_panel_t *op, const scene_t *s,
 
                 // Ground line at Y=0 (side/front views)
                 if (v > 0) {
-                    Color gnd_line = { 120, 120, 150, 200 };
+                    Color gnd_line = is_snow ? (Color){ 80, 85, 95, 200 } : (Color){ 120, 120, 150, 200 };
                     DrawLine3D((Vector3){-ext, 0, -ext}, (Vector3){ ext, 0, -ext}, gnd_line);
                     DrawLine3D((Vector3){-ext, 0,  ext}, (Vector3){ ext, 0,  ext}, gnd_line);
                     DrawLine3D((Vector3){-ext, 0, -ext}, (Vector3){-ext, 0,  ext}, gnd_line);
@@ -152,7 +154,8 @@ void ortho_panel_render(ortho_panel_t *op, const scene_t *s,
                 int gy = (int)((target_y + span / 2.0f) / span * ORTHO_TEX_SIZE);
                 if (gy < 0) gy = 0;
                 if (gy + 1 < ORTHO_TEX_SIZE) {
-                    DrawRectangle(0, gy + 1, ORTHO_TEX_SIZE, ORTHO_TEX_SIZE - gy - 1, (Color){ 2, 2, 6, 180 });
+                    DrawRectangle(0, gy + 1, ORTHO_TEX_SIZE, ORTHO_TEX_SIZE - gy - 1,
+                                  is_snow ? (Color){ 200, 202, 208, 160 } : (Color){ 2, 2, 6, 180 });
                 }
             }
         EndTextureMode();
@@ -210,7 +213,12 @@ void ortho_panel_draw(const ortho_panel_t *op, int screen_h, int hud_bar_h,
     int start_y = screen_h - hud_bar_h - total_h - margin;
 
     Color border_col, label_col, scale_col, cross_col;
-    if (view_mode == VIEW_1988) {
+    if (view_mode == VIEW_SNOW) {
+        border_col = (Color){ 15, 15, 20, 180 };
+        label_col  = (Color){ 15, 15, 20, 220 };
+        scale_col  = (Color){ 40, 40, 50, 200 };
+        cross_col  = (Color){ 15, 15, 20, 80 };
+    } else if (view_mode == VIEW_1988) {
         border_col = (Color){ 255, 20, 100, 120 };
         label_col  = (Color){ 255, 20, 100, 200 };
         scale_col  = (Color){ 255, 20, 100, 160 };
@@ -237,7 +245,8 @@ void ortho_panel_draw(const ortho_panel_t *op, int screen_h, int hud_bar_h,
         float y = (float)(start_y + i * (ps + gap));
 
         // Background
-        DrawRectangle((int)x, (int)y, ps, ps, (Color){ 5, 5, 12, 200 });
+        Color panel_bg = (view_mode == VIEW_SNOW) ? (Color){ 235, 237, 240, 220 } : (Color){ 5, 5, 12, 200 };
+        DrawRectangle((int)x, (int)y, ps, ps, panel_bg);
 
         // Render texture scaled to panel size (flip Y)
         Rectangle src = { 0, (float)ORTHO_TEX_SIZE, (float)ORTHO_TEX_SIZE, (float)(-ORTHO_TEX_SIZE) };
@@ -273,9 +282,11 @@ void ortho_panel_draw_fullscreen_label(int screen_w, int screen_h, int ortho_mod
     float fs = 16 * s;
 
     Color col;
-    if (view_mode == 2)       // VIEW_1988 (can't use enum directly due to header order)
+    if (view_mode == VIEW_SNOW)
+        col = (Color){ 15, 15, 20, 220 };
+    else if (view_mode == VIEW_1988)
         col = (Color){ 255, 20, 100, 200 };
-    else if (view_mode == 1)  // VIEW_REZ
+    else if (view_mode == VIEW_REZ)
         col = (Color){ 0, 204, 218, 200 };
     else
         col = (Color){ 200, 200, 220, 200 };

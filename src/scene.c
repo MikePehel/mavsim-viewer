@@ -28,6 +28,14 @@
 #define REZ_AXIS_X     (Color){ 0,  204, 218, 220 }  // teal, full
 #define REZ_AXIS_Z     (Color){ 0,  204, 218, 220 }  // teal, full
 
+// Snow mode colors (outdoor high-contrast)
+#define SNOW_SKY       (Color){ 240, 242, 245, 255 }
+#define SNOW_GROUND    (Color){ 228, 230, 233, 255 }
+#define SNOW_MINOR     (Color){ 155, 160, 168, 140 }
+#define SNOW_MAJOR     (Color){ 70,  75,  85, 200 }
+#define SNOW_AXIS_X    (Color){ 210,  30,  30, 230 }
+#define SNOW_AXIS_Z    (Color){ 30,   30, 210, 230 }
+
 // 1988 mode colors (synthwave)
 #define SYNTH_SKY      (Color){ 8,   8,  20, 255 }
 #define SYNTH_GROUND   (Color){ 5,   5,  16, 255 }
@@ -352,7 +360,7 @@ void scene_handle_input(scene_t *s) {
             s->view_mode = VIEW_GRID;
         else
             s->view_mode = (s->view_mode + 1) % VIEW_COUNT;
-        const char *names[] = {"Grid", "Rez"};
+        const char *names[] = {"Grid", "Rez", "Snow"};
         printf("View: %s\n", names[s->view_mode]);
     }
 
@@ -448,6 +456,8 @@ void scene_draw(const scene_t *s) {
         draw_shader_grid(s, GRID_GROUND, GRID_MINOR, GRID_MAJOR, GRID_AXIS_X, GRID_AXIS_Z);
     } else if (s->view_mode == VIEW_REZ) {
         draw_shader_grid(s, REZ_GROUND, REZ_MINOR, REZ_MAJOR, REZ_AXIS_X, REZ_AXIS_Z);
+    } else if (s->view_mode == VIEW_SNOW) {
+        draw_shader_grid(s, SNOW_GROUND, SNOW_MINOR, SNOW_MAJOR, SNOW_AXIS_X, SNOW_AXIS_Z);
     } else if (s->view_mode == VIEW_1988) {
         draw_shader_grid(s, SYNTH_GROUND, SYNTH_MINOR, SYNTH_MAJOR, SYNTH_AXIS_X, SYNTH_AXIS_Z);
         rlDisableBackfaceCulling();
@@ -536,10 +546,11 @@ void scene_draw_ortho_ground(const scene_t *s, int screen_w, int screen_h) {
     if (ground_y < 0) ground_y = 0;
     if (ground_y > screen_h) ground_y = screen_h;
 
-    // Dark fill from just below ground line to bottom
+    // Ground fill from just below ground line to bottom
     int fill_h = screen_h - ground_y - 1;
     if (fill_h > 0) {
-        DrawRectangle(0, ground_y + 1, screen_w, fill_h, (Color){ 2, 2, 6, 180 });
+        Color fill = (s->view_mode == VIEW_SNOW) ? (Color){ 200, 202, 208, 160 } : (Color){ 2, 2, 6, 180 };
+        DrawRectangle(0, ground_y + 1, screen_w, fill_h, fill);
     }
 }
 
@@ -547,6 +558,7 @@ void scene_draw_sky(const scene_t *s) {
     switch (s->view_mode) {
         case VIEW_GRID: ClearBackground(GRID_SKY); break;
         case VIEW_REZ:  ClearBackground(REZ_SKY);   break;
+        case VIEW_SNOW: ClearBackground(SNOW_SKY); break;
         case VIEW_1988: ClearBackground(SYNTH_SKY); break;
         default:        ClearBackground(GRID_SKY); break;
     }

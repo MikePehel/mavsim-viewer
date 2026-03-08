@@ -90,22 +90,40 @@ void debug_panel_draw(const debug_panel_t *d, int screen_w, int screen_h,
 
     // Colors per view mode
     Color accent, text_col, dim_col, bg, graph_bg, graph_grid;
-    if (view_mode == VIEW_1988) {
-        accent     = (Color){ 255, 20, 100, 220 };
-        text_col   = (Color){ 255, 200, 210, 230 };
-        dim_col    = (Color){ 255, 20, 100, 100 };
-    } else if (view_mode == VIEW_REZ) {
-        accent     = (Color){ 0, 204, 218, 220 };
-        text_col   = (Color){ 180, 230, 235, 230 };
-        dim_col    = (Color){ 0, 204, 218, 100 };
+    Color status_good, status_warn, status_bad, target_line;
+    if (view_mode == VIEW_SNOW) {
+        accent     = (Color){ 15, 15, 20, 230 };
+        text_col   = (Color){ 20, 20, 30, 230 };
+        dim_col    = (Color){ 60, 65, 75, 160 };
+        bg         = (Color){ 248, 248, 250, 230 };
+        graph_bg   = (Color){ 235, 237, 240, 220 };
+        graph_grid = (Color){ 180, 185, 195, 100 };
+        status_good = (Color){ 0, 120, 50, 255 };
+        status_warn = (Color){ 180, 140, 0, 255 };
+        status_bad  = (Color){ 200, 30, 20, 255 };
+        target_line = (Color){ 0, 120, 50, 60 };
     } else {
-        accent     = (Color){ 120, 180, 255, 220 };
-        text_col   = (Color){ 200, 210, 225, 230 };
-        dim_col    = (Color){ 120, 180, 255, 100 };
+        if (view_mode == VIEW_1988) {
+            accent     = (Color){ 255, 20, 100, 220 };
+            text_col   = (Color){ 255, 200, 210, 230 };
+            dim_col    = (Color){ 255, 20, 100, 100 };
+        } else if (view_mode == VIEW_REZ) {
+            accent     = (Color){ 0, 204, 218, 220 };
+            text_col   = (Color){ 180, 230, 235, 230 };
+            dim_col    = (Color){ 0, 204, 218, 100 };
+        } else {
+            accent     = (Color){ 120, 180, 255, 220 };
+            text_col   = (Color){ 200, 210, 225, 230 };
+            dim_col    = (Color){ 120, 180, 255, 100 };
+        }
+        bg         = (Color){ 8, 8, 16, 210 };
+        graph_bg   = (Color){ 4, 4, 10, 200 };
+        graph_grid = (Color){ 40, 40, 60, 80 };
+        status_good = (Color){ 80, 255, 120, 255 };
+        status_warn = (Color){ 255, 220, 40, 255 };
+        status_bad  = (Color){ 255, 60, 40, 255 };
+        target_line = (Color){ 80, 255, 120, 40 };
     }
-    bg         = (Color){ 8, 8, 16, 210 };
-    graph_bg   = (Color){ 4, 4, 10, 200 };
-    graph_grid = (Color){ 40, 40, 60, 80 };
 
     // Compute total panel height
     // FPS section: title + value + graph + min/max line
@@ -136,9 +154,9 @@ void debug_panel_draw(const debug_panel_t *d, int screen_w, int screen_h,
 
     int fps = GetFPS();
     snprintf(buf, sizeof(buf), "%d", fps);
-    Color fps_col = fps >= 55 ? (Color){80, 255, 120, 255} :
-                    fps >= 30 ? (Color){255, 220, 40, 255} :
-                                (Color){255, 60, 40, 255};
+    Color fps_col = fps >= 55 ? status_good :
+                    fps >= 30 ? status_warn :
+                                status_bad;
     DrawTextEx(font, buf, (Vector2){cx, cy}, fs * 1.4f, 0, fps_col);
     cy += line_h;
 
@@ -176,9 +194,9 @@ void debug_panel_draw(const debug_panel_t *d, int screen_w, int screen_h,
 
     float ft = GetFrameTime() * 1000.0f;
     snprintf(buf, sizeof(buf), "%.1f ms", ft);
-    Color ft_col = ft <= 17.0f ? (Color){80, 255, 120, 255} :
-                   ft <= 33.0f ? (Color){255, 220, 40, 255} :
-                                 (Color){255, 60, 40, 255};
+    Color ft_col = ft <= 17.0f ? status_good :
+                   ft <= 33.0f ? status_warn :
+                                 status_bad;
     DrawTextEx(font, buf, (Vector2){cx, cy}, fs * 1.2f, 0, ft_col);
     cy += line_h;
 
@@ -189,7 +207,7 @@ void debug_panel_draw(const debug_panel_t *d, int screen_w, int screen_h,
 
     // Target line at 16.67ms
     float target_y = cy + graph_h - (16.67f / 33.3f) * graph_h;
-    DrawLine((int)cx, (int)target_y, (int)(cx + graph_w), (int)target_y, (Color){80, 255, 120, 40});
+    DrawLine((int)cx, (int)target_y, (int)(cx + graph_w), (int)target_y, target_line);
 
     snprintf(buf, sizeof(buf), "33ms");
     DrawTextEx(font, buf, (Vector2){cx + graph_w + 2, cy}, fs * 0.7f, 0, dim_col);
