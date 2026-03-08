@@ -32,6 +32,7 @@ typedef struct {
     Quaternion rotation;     // Raylib quaternion
     int model_idx;           // index into vehicle_models[]
     bool origin_set;
+    int origin_wait_count;   // HIL updates received while waiting for HOME_POSITION
     bool active;             // has received data
     double lat0;             // radians
     double lon0;             // radians
@@ -73,7 +74,8 @@ void vehicle_load_model(vehicle_t *v, int model_idx);
 void vehicle_cycle_model(vehicle_t *v);
 
 // Update position/rotation from HIL_STATE_QUATERNION data.
-void vehicle_update(vehicle_t *v, const hil_state_t *state);
+// home may be NULL; if valid, its altitude is used as ground reference.
+void vehicle_update(vehicle_t *v, const hil_state_t *state, const home_position_t *home);
 
 // trail_mode: 0=off, 1=normal trail, 2=speed ribbon
 void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,

@@ -161,11 +161,12 @@ int main(int argc, char *argv[]) {
                 vehicle_reset_trail(&vehicles[i]);
                 if (!origin_specified && vehicle_count == 1) {
                     vehicles[i].origin_set = false;
+                    vehicles[i].origin_wait_count = 0;
                 }
             }
             was_connected[i] = receivers[i].connected;
 
-            vehicle_update(&vehicles[i], &receivers[i].state);
+            vehicle_update(&vehicles[i], &receivers[i].state, &receivers[i].home);
             vehicles[i].sysid = receivers[i].sysid;
 
             // Detect position jump (new SITL connecting before disconnect timeout)
