@@ -115,17 +115,24 @@ The test script accepts these options:
 | `V` | Cycle view mode (Grid / Rez) |
 | `H` | Toggle HUD visibility |
 | `M` | Cycle vehicle model |
+| `O` | Toggle orthographic side panel (Top / Front / Right) |
+| `Alt+1` | Return to perspective camera |
+| `Alt+2`-`7` | Fullscreen ortho view (Top / Front / Left / Right / Bottom / Back) |
 | `TAB` | Cycle to next vehicle |
 | `[` / `]` | Previous / next vehicle |
 | `1`-`9` | Select vehicle directly |
 | `Shift+1`-`9` | Toggle pin/unpin vehicle to HUD |
 | Left-drag | Orbit camera (chase mode) |
-| Scroll wheel | Zoom FOV |
+| Scroll wheel | Zoom FOV (perspective) or span (ortho) |
 
 ### View Modes
 
 - **Grid** (default) — Debug grid with minor/major lines and colored axes
 - **Rez** — Teal grid on black ground with dark sky
+
+### Orthographic Views
+
+Press `O` to open a side panel with three synchronized orthographic views (Top, Front, Right) that follow the selected vehicle. Use `Alt+2`-`7` to switch the main viewport to a fullscreen orthographic camera. Scroll wheel adjusts the visible span. Side views (Front, Back, Left, Right) include a ground plane fill and distance grid with adaptive spacing.
 
 ## Acknowledgments
 
