@@ -13,6 +13,7 @@
 #include "scene.h"
 #include "hud.h"
 #include "debug_panel.h"
+#include "ortho_panel.h"
 
 #define MAX_VEHICLES 16
 
@@ -137,6 +138,9 @@ int main(int argc, char *argv[]) {
     debug_panel_t dbg_panel;
     debug_panel_init(&dbg_panel);
 
+    ortho_panel_t ortho;
+    ortho_panel_init(&ortho);
+
     int selected = 0;
     bool was_connected[MAX_VEHICLES];
     memset(was_connected, 0, sizeof(was_connected));
@@ -210,6 +214,11 @@ int main(int argc, char *argv[]) {
         // Toggle debug panel (Ctrl+D)
         if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_D)) {
             dbg_panel.visible = !dbg_panel.visible;
+        }
+
+        // Toggle ortho panel
+        if (IsKeyPressed(KEY_O)) {
+            ortho.visible = !ortho.visible;
         }
 
         // Cycle model for selected vehicle
@@ -286,6 +295,13 @@ int main(int argc, char *argv[]) {
         // Update camera to follow selected vehicle
         scene_update_camera(&scene, vehicles[selected].position, vehicles[selected].rotation);
 
+        // Render ortho views to textures (before main BeginDrawing)
+        if (ortho.visible) {
+            ortho_panel_update(&ortho, vehicles[selected].position);
+            ortho_panel_render(&ortho, &scene, vehicles, vehicle_count,
+                               selected, scene.view_mode);
+        }
+
         // Render
         BeginDrawing();
 
@@ -301,6 +317,9 @@ int main(int argc, char *argv[]) {
                     }
                 }
             EndMode3D();
+
+            // Ortho ground fill (2D overlay)
+            scene_draw_ortho_ground(&scene, GetScreenWidth(), GetScreenHeight());
 
             // HUD
             if (show_hud) {
@@ -322,10 +341,19 @@ int main(int argc, char *argv[]) {
                                  vehicle_count, active_count, total_trail);
             }
 
+            // Ortho panel overlay
+            int bar_h = show_hud ? hud_bar_height(&hud, GetScreenHeight()) : 0;
+            ortho_panel_draw(&ortho, GetScreenHeight(), bar_h, scene.view_mode, hud.font_label);
+
+            // Fullscreen ortho view label
+            ortho_panel_draw_fullscreen_label(GetScreenWidth(), GetScreenHeight(),
+                scene.ortho_mode, scene.ortho_span, scene.view_mode, hud.font_label);
+
         EndDrawing();
     }
 
     // Cleanup
+    ortho_panel_cleanup(&ortho);
     hud_cleanup(&hud);
     for (int i = 0; i < vehicle_count; i++) {
         vehicle_cleanup(&vehicles[i]);

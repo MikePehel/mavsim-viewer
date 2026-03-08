@@ -118,12 +118,15 @@ The test script accepts these options:
 | `G` | Toggle ground track projection |
 | `M` | Cycle vehicle model |
 | `Ctrl+D` | Toggle debug performance overlay |
+| `O` | Toggle orthographic side panel (Top / Front / Right) |
+| `Alt+1` | Return to perspective camera |
+| `Alt+2`-`7` | Fullscreen ortho view (Top / Front / Left / Right / Bottom / Back) |
 | `TAB` | Cycle to next vehicle |
 | `[` / `]` | Previous / next vehicle |
 | `1`-`9` | Select vehicle directly |
 | `Shift+1`-`9` | Toggle pin/unpin vehicle to HUD |
 | Left-drag | Orbit camera (chase mode) |
-| Scroll wheel | Zoom FOV |
+| Scroll wheel | Zoom FOV (perspective) or span (ortho) |
 
 ### View Modes
 
@@ -140,6 +143,10 @@ Press `Ctrl+D` to toggle a performance debug panel on the right side of the scre
 - **Memory estimates** — trail buffer usage and estimated total footprint
 
 Colors adapt to the active view mode (Grid / Rez / 1988).
+
+### Orthographic Views
+
+Press `O` to open a side panel with three synchronized orthographic views (Top, Front, Right) that follow the selected vehicle. Use `Alt+2`-`7` to switch the main viewport to a fullscreen orthographic camera. Scroll wheel adjusts the visible span. Side views (Front, Back, Left, Right) include a ground plane fill and distance grid with adaptive spacing.
 
 ## Acknowledgments
 

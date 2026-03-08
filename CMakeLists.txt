@@ -24,6 +24,7 @@ add_executable(mavsim-viewer
     src/scene.c
     src/hud.c
     src/debug_panel.c
+    src/ortho_panel.c
 )
 
 target_include_directories(mavsim-viewer PRIVATE

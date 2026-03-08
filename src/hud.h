@@ -23,4 +23,7 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
               int selected, int screen_w, int screen_h, view_mode_t view_mode);
 void hud_cleanup(hud_t *h);
 
+// Returns the total height of the HUD bar in pixels (for layout by other panels).
+int hud_bar_height(const hud_t *h, int screen_h);
+
 #endif

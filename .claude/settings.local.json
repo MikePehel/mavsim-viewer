@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(lsof:*)",
+      "Bash(gh pr:*)",
+      "Bash(git:*)",
+      "Bash(./mavsim-viewer:*)",
+      "Bash(lldb:*)",
+      "Bash(pkill:*)"
+    ]
+  }
+}
