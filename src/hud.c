@@ -353,7 +353,6 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
     // Semantic color variables
     Color accent, accent_dim, bg, border, warn;
     Color label_color, value_color, dim_color;
-    Color climb_color, connected_color;
 
     if (snow) {
         accent = SNOW_ACCENT;  accent_dim = SNOW_ACCENT_DIM;
@@ -372,6 +371,7 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
         warn = (Color){255, 106, 0, 255};
     }
 
+    Color climb_color, connected_color;
     if (snow) {
         label_color = SNOW_ACCENT_DIM;
         value_color = (Color){10, 10, 15, 255};
@@ -690,6 +690,14 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
             ey += line_h;
         }
     }
+}
+
+int hud_bar_height(const hud_t *h, int screen_h) {
+    float s = powf(screen_h / 720.0f, 0.7f);
+    if (s < 1.0f) s = 1.0f;
+    int primary_h = (int)(120 * s);
+    int secondary_h = (int)(38 * s);
+    return primary_h + (h->pinned_count > 0 ? h->pinned_count * secondary_h + (int)(4 * s) : 0);
 }
 
 void hud_cleanup(hud_t *h) {

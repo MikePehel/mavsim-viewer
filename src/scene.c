@@ -1,6 +1,7 @@
 #include "scene.h"
 #include "raymath.h"
 #include "rlgl.h"
+#include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
 
@@ -43,9 +44,328 @@
 #define SYNTH_AXIS_X   (Color){ 255, 20, 100, 220 }   // hot pink, full
 #define SYNTH_AXIS_Z   (Color){ 255, 20, 100, 220 }   // hot pink, full
 
+// 1988 mountain settings
+#define MTN_COLOR      (Color){ 1, 156, 227, 255 }    // #019CE3 teal
+#define MTN_COLS       40
+#define MTN_ROWS       12
+#define MTN_DEPTH      400.0f
+#define MTN_PEAK       350.0f
+
+static float mtn_hash(int x, int y) {
+    unsigned int h = (unsigned int)(x * 7919 + y * 104729 + 31337);
+    h ^= h >> 13;
+    h *= 0x5bd1e995;
+    h ^= h >> 15;
+    return (float)(h & 0xFFFF) / 65535.0f;
+}
+
+static float mtn_vnoise(float x, float y) {
+    int ix = (int)floorf(x), iy = (int)floorf(y);
+    float fx = x - ix, fy = y - iy;
+    fx = fx * fx * (3.0f - 2.0f * fx);
+    fy = fy * fy * (3.0f - 2.0f * fy);
+    float a = mtn_hash(ix, iy), b = mtn_hash(ix+1, iy);
+    float c = mtn_hash(ix, iy+1), d = mtn_hash(ix+1, iy+1);
+    return a + (b-a)*fx + (c-a)*fy + (a-b-c+d)*fx*fy;
+}
+
+static float mtn_fbm(float x, float y) {
+    float v = 0.0f;
+    v += mtn_vnoise(x, y) * 1.0f;
+    v += mtn_vnoise(x*2.0f + 5.3f, y*2.0f + 1.7f) * 0.5f;
+    v += mtn_vnoise(x*4.0f + 9.1f, y*4.0f + 3.2f) * 0.25f;
+    return v / 1.75f;
+}
+
+static float mtn_get_height(float along, float deep, int edge) {
+    float env = sinf(deep * 3.14159f);
+    env = powf(env, 0.6f);
+    float edge_taper = 1.0f;
+    if (along < 0.15f) edge_taper = along / 0.15f;
+    else if (along > 0.85f) edge_taper = (1.0f - along) / 0.15f;
+    edge_taper = edge_taper * edge_taper;
+    env *= edge_taper;
+    float ox = along * 5.0f + edge * 13.7f;
+    float oy = deep * 3.0f + edge * 7.3f;
+    float n = mtn_fbm(ox, oy);
+    float ridge = 1.0f - fabsf(n * 2.0f - 1.0f);
+    ridge = powf(ridge, 2.0f);
+    float variation = mtn_vnoise(along * 3.0f + edge * 5.1f, deep * 1.5f + edge * 2.3f);
+    variation = 0.3f + 0.7f * variation;
+    float h = env * ridge * variation * MTN_PEAK;
+    if (h < MTN_PEAK * 0.15f) h *= 0.7f;
+    return h;
+}
+
+static void mtn_vert(Mesh *m, int vi, float x, float y, float z,
+                     float bx, float by, unsigned char r, unsigned char g, unsigned char b) {
+    m->vertices[vi*3+0] = x;  m->vertices[vi*3+1] = y;  m->vertices[vi*3+2] = z;
+    m->texcoords[vi*2+0] = bx; m->texcoords[vi*2+1] = by;
+    m->colors[vi*4+0] = r; m->colors[vi*4+1] = g; m->colors[vi*4+2] = b; m->colors[vi*4+3] = 255;
+}
+
+static Mesh gen_mountains(void) {
+    int total_tris = 4 * MTN_COLS * MTN_ROWS * 2;
+    int vert_count = total_tris * 3;
+
+    Mesh mesh = { 0 };
+    mesh.triangleCount = total_tris;
+    mesh.vertexCount = vert_count;
+    mesh.vertices = RL_CALLOC(vert_count * 3, sizeof(float));
+    mesh.texcoords = RL_CALLOC(vert_count * 2, sizeof(float));
+    mesh.colors = RL_CALLOC(vert_count * 4, sizeof(unsigned char));
+
+    float ext = GRID_EXTENT;
+    unsigned char cr = MTN_COLOR.r, cg = MTN_COLOR.g, cb = MTN_COLOR.b;
+
+    float edges[4][6] = {
+        { -ext, -ext,  1,  0,  0, -1 },
+        {  ext, -ext,  0,  1,  1,  0 },
+        {  ext,  ext, -1,  0,  0,  1 },
+        { -ext,  ext,  0, -1, -1,  0 },
+    };
+
+    int vi = 0;
+    for (int e = 0; e < 4; e++) {
+        float sx = edges[e][0], sz = edges[e][1];
+        float adx = edges[e][2], adz = edges[e][3];
+        float onx = edges[e][4], onz = edges[e][5];
+        float elen = 2.0f * ext;
+
+        for (int c = 0; c < MTN_COLS; c++) {
+            for (int r = 0; r < MTN_ROWS; r++) {
+                float a0 = (float)c / MTN_COLS, a1 = (float)(c+1) / MTN_COLS;
+                float d0 = (float)r / MTN_ROWS, d1 = (float)(r+1) / MTN_ROWS;
+
+                float x00 = sx + adx*a0*elen + onx*d0*MTN_DEPTH;
+                float z00 = sz + adz*a0*elen + onz*d0*MTN_DEPTH;
+                float y00 = mtn_get_height(a0, d0, e);
+
+                float x10 = sx + adx*a1*elen + onx*d0*MTN_DEPTH;
+                float z10 = sz + adz*a1*elen + onz*d0*MTN_DEPTH;
+                float y10 = mtn_get_height(a1, d0, e);
+
+                float x01 = sx + adx*a0*elen + onx*d1*MTN_DEPTH;
+                float z01 = sz + adz*a0*elen + onz*d1*MTN_DEPTH;
+                float y01 = mtn_get_height(a0, d1, e);
+
+                float x11 = sx + adx*a1*elen + onx*d1*MTN_DEPTH;
+                float z11 = sz + adz*a1*elen + onz*d1*MTN_DEPTH;
+                float y11 = mtn_get_height(a1, d1, e);
+
+                mtn_vert(&mesh, vi++, x00,y00,z00, 1,0, cr,cg,cb);
+                mtn_vert(&mesh, vi++, x10,y10,z10, 0,1, cr,cg,cb);
+                mtn_vert(&mesh, vi++, x01,y01,z01, 0,0, cr,cg,cb);
+                mtn_vert(&mesh, vi++, x10,y10,z10, 1,0, cr,cg,cb);
+                mtn_vert(&mesh, vi++, x11,y11,z11, 0,1, cr,cg,cb);
+                mtn_vert(&mesh, vi++, x01,y01,z01, 0,0, cr,cg,cb);
+            }
+        }
+    }
+
+    UploadMesh(&mesh, false);
+    return mesh;
+}
+
+// ── Procedural ground texture: packed dirt (256x256, 256KB VRAM) ─────────────
+// Double domain-warped FBM + Voronoi pebbles + warm color variation.
+// Fog in shader hides tile repeat at distance.
+
+static float gtex_hash(int x, int y) {
+    unsigned int h = (unsigned int)(x * 12979 + y * 87811 + 52967);
+    h ^= h >> 13; h *= 0x5bd1e995; h ^= h >> 15;
+    return (float)(h & 0xFFFF) / 65535.0f;
+}
+
+static void gtex_hash2(int x, int y, float *ox, float *oy) {
+    unsigned int h1 = (unsigned int)(x * 12979 + y * 87811 + 52967);
+    h1 ^= h1 >> 13; h1 *= 0x5bd1e995; h1 ^= h1 >> 15;
+    unsigned int h2 = (unsigned int)(x * 73939 + y * 14197 + 81239);
+    h2 ^= h2 >> 13; h2 *= 0x5bd1e995; h2 ^= h2 >> 15;
+    *ox = (float)(h1 & 0xFFFF) / 65535.0f;
+    *oy = (float)(h2 & 0xFFFF) / 65535.0f;
+}
+
+static float gtex_vnoise(float x, float y) {
+    int ix = (int)floorf(x), iy = (int)floorf(y);
+    float fx = x - ix, fy = y - iy;
+    fx = fx * fx * (3.0f - 2.0f * fx);
+    fy = fy * fy * (3.0f - 2.0f * fy);
+    float a = gtex_hash(ix, iy), b = gtex_hash(ix+1, iy);
+    float c = gtex_hash(ix, iy+1), d = gtex_hash(ix+1, iy+1);
+    return a + (b-a)*fx + (c-a)*fy + (a-b-c+d)*fx*fy;
+}
+
+// 4D value noise for torus mapping
+static float gtex_hash4(int x, int y, int z, int w) {
+    unsigned int h = (unsigned int)(x * 12979 + y * 87811 + z * 45053 + w * 67867 + 52967);
+    h ^= h >> 13; h *= 0x5bd1e995; h ^= h >> 15;
+    return (float)(h & 0xFFFF) / 65535.0f;
+}
+
+static float gtex_vnoise4d(float x, float y, float z, float w) {
+    int ix = (int)floorf(x), iy = (int)floorf(y);
+    int iz = (int)floorf(z), iw = (int)floorf(w);
+    float fx = x - ix, fy = y - iy, fz = z - iz, fw = w - iw;
+    fx = fx*fx*(3-2*fx); fy = fy*fy*(3-2*fy);
+    fz = fz*fz*(3-2*fz); fw = fw*fw*(3-2*fw);
+
+    float result = 0;
+    for (int dw = 0; dw <= 1; dw++) {
+        for (int dz = 0; dz <= 1; dz++) {
+            for (int dy = 0; dy <= 1; dy++) {
+                for (int dx = 0; dx <= 1; dx++) {
+                    float val = gtex_hash4(ix+dx, iy+dy, iz+dz, iw+dw);
+                    float wx2 = dx ? fx : (1-fx);
+                    float wy2 = dy ? fy : (1-fy);
+                    float wz2 = dz ? fz : (1-fz);
+                    float ww2 = dw ? fw : (1-fw);
+                    result += val * wx2 * wy2 * wz2 * ww2;
+                }
+            }
+        }
+    }
+    return result;
+}
+
+// Tileable noise via torus mapping: (u,v) -> 4D point on torus surface
+// Naturally periodic in both axes, no blending artifacts
+static float gtex_tnoise(float u, float v, float freq) {
+    float a = u * 2.0f * 3.14159265f;
+    float b = v * 2.0f * 3.14159265f;
+    return gtex_vnoise4d(
+        cosf(a) * freq, sinf(a) * freq,
+        cosf(b) * freq, sinf(b) * freq);
+}
+
+static float gtex_fbm(float u, float v) {
+    return gtex_tnoise(u, v, 1.0f) * 0.50f
+         + gtex_tnoise(u, v, 2.0f) * 0.30f
+         + gtex_tnoise(u, v, 4.0f) * 0.20f;
+}
+
+// Tileable Voronoi via torus: wrap cell indices at period
+static float gtex_voronoi_f1(float u, float v, int cells) {
+    float x = u * cells, y = v * cells;
+    int ix = (int)floorf(x), iy = (int)floorf(y);
+    float fx = x - ix, fy = y - iy;
+    float f1 = 99.0f;
+    for (int j = -1; j <= 1; j++) {
+        for (int i = -1; i <= 1; i++) {
+            int cx = ((ix + i) % cells + cells) % cells;
+            int cy = ((iy + j) % cells + cells) % cells;
+            float ox, oy;
+            gtex_hash2(cx, cy, &ox, &oy);
+            float dx = (float)i + ox - fx, dy = (float)j + oy - fy;
+            float d = sqrtf(dx*dx + dy*dy);
+            if (d < f1) f1 = d;
+        }
+    }
+    return f1;
+}
+
+static float clampf(float v, float lo, float hi) {
+    return v < lo ? lo : (v > hi ? hi : v);
+}
+
+// Generate a 2x2 atlas of 256x256 tiles (512x512 total).
+// All 4 tiles share the same torus-mapped base noise (seamless edges).
+// Each tile adds unique detail via a window function that fades to zero at edges.
+#define GTEX_ATLAS 512   // total atlas size
+#define GTEX_TILE  256   // individual tile size
+#define GTEX_VARIANTS 4  // 2x2 grid
+
+static Texture2D gen_ground_texture(void) {
+    unsigned char *pixels = RL_CALLOC(GTEX_ATLAS * GTEX_ATLAS * 4, 1);
+    float tile_inv = 1.0f / (float)GTEX_TILE;
+
+    // Seed offsets for per-tile variation (widely spaced for max difference)
+    float seed_offsets[GTEX_VARIANTS][2] = {
+        { 0.0f, 0.0f }, { 17.3f, 41.7f }, { 63.2f, 11.9f }, { 34.8f, 78.1f }
+    };
+
+    for (int tile = 0; tile < GTEX_VARIANTS; tile++) {
+        int tile_ox = (tile % 2) * GTEX_TILE;  // atlas x offset
+        int tile_oy = (tile / 2) * GTEX_TILE;  // atlas y offset
+        float sox = seed_offsets[tile][0];
+        float soy = seed_offsets[tile][1];
+
+        for (int ty = 0; ty < GTEX_TILE; ty++) {
+            for (int tx = 0; tx < GTEX_TILE; tx++) {
+                float u = (float)tx * tile_inv;
+                float v = (float)ty * tile_inv;
+
+                // Window: 1 at center, 0 at edges (smooth sin² falloff)
+                float wu = sinf(u * 3.14159265f);
+                float wv = sinf(v * 3.14159265f);
+                float window = wu * wu * wv * wv;
+
+                // Base layer: torus-mapped, identical across all tiles
+                float qx = gtex_fbm(u, v);
+                float qy = gtex_fbm(u + 0.52f, v + 0.13f);
+                float base_warped = gtex_fbm(u + 0.15f*qx, v + 0.15f*qy);
+
+                // Detail layer: unique per tile, windowed to zero at edges
+                float dx = gtex_fbm(u + sox, v + soy);
+                float dy = gtex_fbm(u + sox + 0.52f, v + soy + 0.13f);
+                float detail_warped = gtex_fbm(u + 0.4f*dx + sox, v + 0.4f*dy + soy);
+                float detail = (detail_warped - 0.5f) * window;
+
+                float warped = base_warped + detail * 1.2f;
+
+                // Voronoi pebbles: base uses torus tiling, detail adds per-tile variation
+                float f1_base = gtex_voronoi_f1(u, v, 18);
+                float f1_detail = gtex_voronoi_f1(u + sox, v + soy, 14);
+                float f1 = f1_base * (1.0f - window * 0.8f) + f1_detail * window * 0.8f;
+                float pebble = powf(clampf(1.0f - f1 * 2.5f, 0, 1), 4.0f) * 0.5f;
+
+                // Fine grit (per-tile unique)
+                float grit = gtex_tnoise(u + sox, v + soy, 8.0f);
+
+                // Compose brightness
+                float brightness = 32.0f;
+                brightness += (warped - 0.5f) * 16.0f;
+                brightness += pebble * 12.0f;
+                brightness += (grit - 0.5f) * 3.0f;
+                brightness = clampf(brightness, 20.0f, 46.0f);
+
+                // Warm/cool color (detail drives more tint per tile)
+                float warm = (qx + detail * 0.6f - 0.5f) * 0.12f;
+                float r = brightness * (1.0f + warm) + 2.0f;
+                float g = brightness + 1.0f;
+                float b = brightness * (1.0f - warm);
+
+                int px = tile_ox + tx;
+                int py = tile_oy + ty;
+                int idx = (py * GTEX_ATLAS + px) * 4;
+                pixels[idx + 0] = (unsigned char)clampf(r, 0, 255);
+                pixels[idx + 1] = (unsigned char)clampf(g, 0, 255);
+                pixels[idx + 2] = (unsigned char)clampf(b, 0, 255);
+                pixels[idx + 3] = 255;
+            }
+        }
+    }
+
+    Image img = {
+        .data = pixels,
+        .width = GTEX_ATLAS,
+        .height = GTEX_ATLAS,
+        .mipmaps = 1,
+        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
+    };
+    Texture2D tex = LoadTextureFromImage(img);
+    GenTextureMipmaps(&tex);
+    SetTextureFilter(tex, TEXTURE_FILTER_TRILINEAR);
+    SetTextureWrap(tex, TEXTURE_WRAP_CLAMP);  // no hardware repeat — shader handles tiling
+    UnloadImage(img);
+    return tex;
+}
+
 void scene_init(scene_t *s) {
     s->cam_mode = CAM_MODE_CHASE;
     s->view_mode = VIEW_GRID;
+    s->ortho_mode = ORTHO_NONE;
+    s->ortho_span = 60.0f;
     s->chase_distance = 3.0f;
     s->chase_yaw = 0.0f;
     s->chase_pitch = 0.4f;  // ~23° above horizontal
@@ -73,9 +393,39 @@ void scene_init(scene_t *s) {
     s->loc_axisWidth  = GetShaderLocation(s->grid_shader, "axisWidth");
     s->loc_matModel   = GetShaderLocation(s->grid_shader, "matModel");
 
+    s->loc_texEnabled = GetShaderLocation(s->grid_shader, "texEnabled");
+    s->loc_groundTex  = GetShaderLocation(s->grid_shader, "groundTex");
+    s->loc_colFog     = GetShaderLocation(s->grid_shader, "colFog");
+    s->loc_colTint    = GetShaderLocation(s->grid_shader, "colTint");
+
+    // Generate procedural ground texture
+    double t0 = GetTime();
+    s->ground_tex = gen_ground_texture();
+    printf("Ground texture: %dx%d atlas (4x%dx%d) generated in %.1fms\n",
+           GTEX_ATLAS, GTEX_ATLAS, GTEX_TILE, GTEX_TILE, (GetTime() - t0) * 1000.0);
+    s->ground_tex_on = false;
+
     Mesh grid_mesh = GenMeshPlane(GROUND_SIZE * 2, GROUND_SIZE * 2, 100, 100);
     s->grid_plane = LoadModelFromMesh(grid_mesh);
     s->grid_plane.materials[0].shader = s->grid_shader;
+
+    // 1988 mountains
+    s->mtn_shader = LoadShader("shaders/mountain.vs", "shaders/mountain.fs");
+    Mesh mtn_mesh = gen_mountains();
+    s->mountains = LoadModelFromMesh(mtn_mesh);
+    s->mountains.materials[0].shader = s->mtn_shader;
+
+    // Vehicle lighting shader — single directional light
+    s->lighting_shader = LoadShader("shaders/lighting.vs", "shaders/lighting.fs");
+    s->loc_lightDir  = GetShaderLocation(s->lighting_shader, "lightDir");
+    s->loc_ambient   = GetShaderLocation(s->lighting_shader, "ambient");
+    s->loc_matNormal = GetShaderLocation(s->lighting_shader, "matNormal");
+
+    // Sun from upper-left-front
+    Vector3 sun = Vector3Normalize((Vector3){ -0.4f, 0.8f, -0.3f });
+    SetShaderValue(s->lighting_shader, s->loc_lightDir, &sun, SHADER_UNIFORM_VEC3);
+    float ambient = 0.35f;
+    SetShaderValue(s->lighting_shader, s->loc_ambient, &ambient, SHADER_UNIFORM_FLOAT);
 }
 
 static void update_chase_camera(scene_t *s, Vector3 pos) {
@@ -117,7 +467,54 @@ static void update_fpv_camera(scene_t *s, Vector3 pos, Quaternion rot) {
     s->camera.up = up;
 }
 
+static void update_ortho_camera(scene_t *s, Vector3 pos) {
+    float span = s->ortho_span;
+    s->camera.projection = CAMERA_ORTHOGRAPHIC;
+    s->camera.fovy = span;
+
+    switch (s->ortho_mode) {
+        case ORTHO_TOP:
+            s->camera.position = (Vector3){ pos.x, pos.y + 100.0f, pos.z };
+            s->camera.target = pos;
+            s->camera.up = (Vector3){ 0, 0, -1 };
+            break;
+        case ORTHO_BOTTOM:
+            s->camera.position = (Vector3){ pos.x, pos.y - 100.0f, pos.z };
+            s->camera.target = pos;
+            s->camera.up = (Vector3){ 0, 0, 1 };
+            break;
+        case ORTHO_FRONT:
+            s->camera.position = (Vector3){ pos.x, pos.y, pos.z - 100.0f };
+            s->camera.target = pos;
+            s->camera.up = (Vector3){ 0, 1, 0 };
+            break;
+        case ORTHO_BACK:
+            s->camera.position = (Vector3){ pos.x, pos.y, pos.z + 100.0f };
+            s->camera.target = pos;
+            s->camera.up = (Vector3){ 0, 1, 0 };
+            break;
+        case ORTHO_LEFT:
+            s->camera.position = (Vector3){ pos.x - 100.0f, pos.y, pos.z };
+            s->camera.target = pos;
+            s->camera.up = (Vector3){ 0, 1, 0 };
+            break;
+        case ORTHO_RIGHT:
+            s->camera.position = (Vector3){ pos.x + 100.0f, pos.y, pos.z };
+            s->camera.target = pos;
+            s->camera.up = (Vector3){ 0, 1, 0 };
+            break;
+        default:
+            break;
+    }
+}
+
 void scene_update_camera(scene_t *s, Vector3 vehicle_pos, Quaternion vehicle_rot) {
+    if (s->ortho_mode != ORTHO_NONE) {
+        update_ortho_camera(s, vehicle_pos);
+        return;
+    }
+
+    s->camera.projection = CAMERA_PERSPECTIVE;
     switch (s->cam_mode) {
         case CAM_MODE_CHASE:
             update_chase_camera(s, vehicle_pos);
@@ -131,7 +528,29 @@ void scene_update_camera(scene_t *s, Vector3 vehicle_pos, Quaternion vehicle_rot
 }
 
 void scene_handle_input(scene_t *s) {
+    // Alt+number: fullscreen ortho views
+    if (IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT)) {
+        static const int keys[] = { KEY_ONE, KEY_TWO, KEY_THREE, KEY_FOUR, KEY_FIVE, KEY_SIX, KEY_SEVEN };
+        static const ortho_mode_t modes[] = { ORTHO_NONE, ORTHO_TOP, ORTHO_FRONT, ORTHO_LEFT, ORTHO_RIGHT, ORTHO_BOTTOM, ORTHO_BACK };
+        static const char *names[] = { "Perspective", "Top", "Front", "Left", "Right", "Bottom", "Back" };
+        for (int i = 0; i < 7; i++) {
+            if (IsKeyPressed(keys[i])) {
+                s->ortho_mode = modes[i];
+                printf("View: %s\n", names[i]);
+                break;
+            }
+        }
+        // Alt+scroll to zoom ortho span
+        float wheel = GetMouseWheelMove();
+        if (wheel != 0.0f && s->ortho_mode != ORTHO_NONE) {
+            s->ortho_span -= wheel * 10.0f;
+            if (s->ortho_span < 10.0f) s->ortho_span = 10.0f;
+            if (s->ortho_span > 500.0f) s->ortho_span = 500.0f;
+        }
+    }
+
     if (IsKeyPressed(KEY_C)) {
+        s->ortho_mode = ORTHO_NONE;  // return to perspective on camera toggle
         s->cam_mode = (s->cam_mode + 1) % CAM_MODE_COUNT;
         const char *names[] = {"Chase", "FPV"};
         printf("Camera: %s\n", names[s->cam_mode]);
@@ -139,6 +558,11 @@ void scene_handle_input(scene_t *s) {
         s->camera.up = (Vector3){0, 1, 0};
         s->fpv_yaw = 0.0f;
         s->fpv_pitch = 0.0f;
+    }
+
+    if (IsKeyPressed(KEY_F)) {
+        s->ground_tex_on = !s->ground_tex_on;
+        printf("Ground texture: %s\n", s->ground_tex_on ? "ON" : "OFF");
     }
 
     if (IsKeyPressed(KEY_V)) {
@@ -187,12 +611,23 @@ void scene_handle_input(scene_t *s) {
         }
     }
 
-    // Scroll wheel FOV zoom
-    float wheel = GetMouseWheelMove();
-    if (wheel != 0.0f) {
-        s->camera.fovy -= wheel * 5.0f;
-        if (s->camera.fovy < 10.0f) s->camera.fovy = 10.0f;
-        if (s->camera.fovy > 120.0f) s->camera.fovy = 120.0f;
+    // Scroll wheel FOV zoom (only in perspective mode, not when Alt held)
+    if (!IsKeyDown(KEY_LEFT_ALT) && !IsKeyDown(KEY_RIGHT_ALT) && s->ortho_mode == ORTHO_NONE) {
+        float wheel = GetMouseWheelMove();
+        if (wheel != 0.0f) {
+            s->camera.fovy -= wheel * 5.0f;
+            if (s->camera.fovy < 10.0f) s->camera.fovy = 10.0f;
+            if (s->camera.fovy > 120.0f) s->camera.fovy = 120.0f;
+        }
+    }
+    // Scroll wheel ortho span zoom (fullscreen ortho, no Alt needed)
+    if (s->ortho_mode != ORTHO_NONE && !IsKeyDown(KEY_LEFT_ALT) && !IsKeyDown(KEY_RIGHT_ALT)) {
+        float wheel = GetMouseWheelMove();
+        if (wheel != 0.0f) {
+            s->ortho_span -= wheel * 10.0f;
+            if (s->ortho_span < 10.0f) s->ortho_span = 10.0f;
+            if (s->ortho_span > 500.0f) s->ortho_span = 500.0f;
+        }
     }
 }
 
@@ -204,7 +639,8 @@ static void color_to_vec4(Color c, float out[4]) {
 }
 
 static void draw_shader_grid(const scene_t *s,
-    Color ground, Color minor, Color major, Color axis_x, Color axis_z)
+    Color ground, Color minor, Color major, Color axis_x, Color axis_z,
+    Color fog, Color tint)
 {
     float v[4];
     color_to_vec4(ground, v); SetShaderValue(s->grid_shader, s->loc_colGround, v, SHADER_UNIFORM_VEC4);
@@ -212,6 +648,8 @@ static void draw_shader_grid(const scene_t *s,
     color_to_vec4(major, v);  SetShaderValue(s->grid_shader, s->loc_colMajor, v, SHADER_UNIFORM_VEC4);
     color_to_vec4(axis_x, v); SetShaderValue(s->grid_shader, s->loc_colAxisX, v, SHADER_UNIFORM_VEC4);
     color_to_vec4(axis_z, v); SetShaderValue(s->grid_shader, s->loc_colAxisZ, v, SHADER_UNIFORM_VEC4);
+    color_to_vec4(fog, v);    SetShaderValue(s->grid_shader, s->loc_colFog, v, SHADER_UNIFORM_VEC4);
+    color_to_vec4(tint, v);   SetShaderValue(s->grid_shader, s->loc_colTint, v, SHADER_UNIFORM_VEC4);
 
     float spacing = GRID_SPACING;
     float majorEvery = (float)GRID_MAJOR_EVERY;
@@ -220,22 +658,137 @@ static void draw_shader_grid(const scene_t *s,
     SetShaderValue(s->grid_shader, s->loc_majorEvery, &majorEvery, SHADER_UNIFORM_FLOAT);
     SetShaderValue(s->grid_shader, s->loc_axisWidth, &axisWidth, SHADER_UNIFORM_FLOAT);
 
+    // Ground texture: any mode when toggled on
+    int texOn = s->ground_tex_on ? 1 : 0;
+    SetShaderValue(s->grid_shader, s->loc_texEnabled, &texOn, SHADER_UNIFORM_INT);
+    if (texOn) {
+        // Bind ground texture to texture unit 1 (unit 0 is the default material)
+        rlActiveTextureSlot(1);
+        rlEnableTexture(s->ground_tex.id);
+        SetShaderValue(s->grid_shader, s->loc_groundTex, (int[]){1}, SHADER_UNIFORM_INT);
+    }
+
     // Pass identity model matrix (plane is at origin)
     Matrix model = MatrixIdentity();
     SetShaderValueMatrix(s->grid_shader, s->loc_matModel, model);
 
     DrawModel(s->grid_plane, (Vector3){0, 0, 0}, 1.0f, WHITE);
+
+    if (texOn) {
+        rlActiveTextureSlot(1);
+        rlDisableTexture();
+        rlActiveTextureSlot(0);
+    }
 }
 
 void scene_draw(const scene_t *s) {
     if (s->view_mode == VIEW_GRID) {
-        draw_shader_grid(s, GRID_GROUND, GRID_MINOR, GRID_MAJOR, GRID_AXIS_X, GRID_AXIS_Z);
+        // Brown dirt tint, slight green fog
+        draw_shader_grid(s, GRID_GROUND, GRID_MINOR, GRID_MAJOR, GRID_AXIS_X, GRID_AXIS_Z,
+            (Color){ 30, 34, 28, 255 }, (Color){ 42, 38, 32, 255 });
     } else if (s->view_mode == VIEW_REZ) {
-        draw_shader_grid(s, REZ_GROUND, REZ_MINOR, REZ_MAJOR, REZ_AXIS_X, REZ_AXIS_Z);
+        // Bluish-purple tint (from original multiplicative ratio on dark teal ground)
+        draw_shader_grid(s, REZ_GROUND, REZ_MINOR, REZ_MAJOR, REZ_AXIS_X, REZ_AXIS_Z,
+            REZ_GROUND, (Color){ 31, 31, 59, 255 });
     } else if (s->view_mode == VIEW_SNOW) {
-        draw_shader_grid(s, SNOW_GROUND, SNOW_MINOR, SNOW_MAJOR, SNOW_AXIS_X, SNOW_AXIS_Z);
+        // Light grey/white dirt
+        draw_shader_grid(s, SNOW_GROUND, SNOW_MINOR, SNOW_MAJOR, SNOW_AXIS_X, SNOW_AXIS_Z,
+            SNOW_GROUND, (Color){ 215, 218, 222, 255 });
     } else if (s->view_mode == VIEW_1988) {
-        draw_shader_grid(s, SYNTH_GROUND, SYNTH_MINOR, SYNTH_MAJOR, SYNTH_AXIS_X, SYNTH_AXIS_Z);
+        // Deep blue-purple tint (from original multiplicative ratio on dark synth ground)
+        draw_shader_grid(s, SYNTH_GROUND, SYNTH_MINOR, SYNTH_MAJOR, SYNTH_AXIS_X, SYNTH_AXIS_Z,
+            SYNTH_GROUND, (Color){ 25, 25, 82, 255 });
+        rlDisableBackfaceCulling();
+        DrawModel(s->mountains, (Vector3){0, 0, 0}, 1.0f, WHITE);
+        rlEnableBackfaceCulling();
+    }
+
+    // Fullscreen ortho: distance grid + ground fill
+    if (s->ortho_mode != ORTHO_NONE) {
+        float ext = s->ortho_span * 2.0f;
+        float spacing = 10.0f;
+        if (s->ortho_span > 200.0f) spacing = 50.0f;
+        else if (s->ortho_span > 80.0f) spacing = 20.0f;
+        else if (s->ortho_span < 20.0f) spacing = 2.0f;
+
+        Color grid_minor = { 40, 40, 55, 60 };
+        Color grid_major = { 60, 60, 80, 100 };
+        Vector3 center = s->camera.target;
+
+        if (s->ortho_mode == ORTHO_TOP || s->ortho_mode == ORTHO_BOTTOM) {
+            float snap_x = floorf(center.x / spacing) * spacing;
+            float snap_z = floorf(center.z / spacing) * spacing;
+            for (float g = -ext; g <= ext; g += spacing) {
+                bool major = fabsf(fmodf(snap_x + g, spacing * 5)) < 0.1f;
+                DrawLine3D((Vector3){snap_x + g, 0.01f, center.z - ext},
+                           (Vector3){snap_x + g, 0.01f, center.z + ext}, major ? grid_major : grid_minor);
+            }
+            for (float g = -ext; g <= ext; g += spacing) {
+                bool major = fabsf(fmodf(snap_z + g, spacing * 5)) < 0.1f;
+                DrawLine3D((Vector3){center.x - ext, 0.01f, snap_z + g},
+                           (Vector3){center.x + ext, 0.01f, snap_z + g}, major ? grid_major : grid_minor);
+            }
+        } else if (s->ortho_mode == ORTHO_FRONT || s->ortho_mode == ORTHO_BACK) {
+            float snap_x = floorf(center.x / spacing) * spacing;
+            float snap_y = floorf(center.y / spacing) * spacing;
+            float z = center.z;
+            for (float g = -ext; g <= ext; g += spacing) {
+                bool major = fabsf(fmodf(snap_x + g, spacing * 5)) < 0.1f;
+                DrawLine3D((Vector3){snap_x + g, center.y - ext, z},
+                           (Vector3){snap_x + g, center.y + ext, z}, major ? grid_major : grid_minor);
+            }
+            for (float g = -ext; g <= ext; g += spacing) {
+                bool major = fabsf(fmodf(snap_y + g, spacing * 5)) < 0.1f;
+                DrawLine3D((Vector3){center.x - ext, snap_y + g, z},
+                           (Vector3){center.x + ext, snap_y + g, z}, major ? grid_major : grid_minor);
+            }
+        } else {
+            // Left / Right: ZY grid
+            float snap_z = floorf(center.z / spacing) * spacing;
+            float snap_y = floorf(center.y / spacing) * spacing;
+            float x = center.x;
+            for (float g = -ext; g <= ext; g += spacing) {
+                bool major = fabsf(fmodf(snap_z + g, spacing * 5)) < 0.1f;
+                DrawLine3D((Vector3){x, center.y - ext, snap_z + g},
+                           (Vector3){x, center.y + ext, snap_z + g}, major ? grid_major : grid_minor);
+            }
+            for (float g = -ext; g <= ext; g += spacing) {
+                bool major = fabsf(fmodf(snap_y + g, spacing * 5)) < 0.1f;
+                DrawLine3D((Vector3){x, snap_y + g, center.z - ext},
+                           (Vector3){x, snap_y + g, center.z + ext}, major ? grid_major : grid_minor);
+            }
+        }
+
+        // Ground line for side views (fill is drawn as 2D overlay after EndMode3D)
+        if (s->ortho_mode >= ORTHO_FRONT && s->ortho_mode <= ORTHO_RIGHT) {
+            Color gnd_line = { 120, 120, 150, 200 };
+            DrawLine3D((Vector3){-ext, 0, -ext}, (Vector3){ ext, 0, -ext}, gnd_line);
+            DrawLine3D((Vector3){-ext, 0,  ext}, (Vector3){ ext, 0,  ext}, gnd_line);
+            DrawLine3D((Vector3){-ext, 0, -ext}, (Vector3){-ext, 0,  ext}, gnd_line);
+            DrawLine3D((Vector3){ ext, 0, -ext}, (Vector3){ ext, 0,  ext}, gnd_line);
+        }
+    }
+}
+
+void scene_draw_ortho_ground(const scene_t *s, int screen_w, int screen_h) {
+    // Only for side ortho views (front/back/left/right)
+    if (s->ortho_mode < ORTHO_FRONT || s->ortho_mode > ORTHO_RIGHT) return;
+
+    // Project Y=0 world position to screen Y
+    Vector3 ground_pt = s->camera.target;
+    ground_pt.y = 0.0f;
+    Vector2 screen_pos = GetWorldToScreen(ground_pt, s->camera);
+    int ground_y = (int)screen_pos.y;
+
+    // Clamp to screen bounds
+    if (ground_y < 0) ground_y = 0;
+    if (ground_y > screen_h) ground_y = screen_h;
+
+    // Ground fill from just below ground line to bottom
+    int fill_h = screen_h - ground_y - 1;
+    if (fill_h > 0) {
+        Color fill = (s->view_mode == VIEW_SNOW) ? (Color){ 200, 202, 208, 160 } : (Color){ 2, 2, 6, 180 };
+        DrawRectangle(0, ground_y + 1, screen_w, fill_h, fill);
     }
 }
 
@@ -250,6 +803,10 @@ void scene_draw_sky(const scene_t *s) {
 }
 
 void scene_cleanup(scene_t *s) {
+    UnloadTexture(s->ground_tex);
     UnloadModel(s->grid_plane);
     UnloadShader(s->grid_shader);
+    UnloadModel(s->mountains);
+    UnloadShader(s->mtn_shader);
+    UnloadShader(s->lighting_shader);
 }

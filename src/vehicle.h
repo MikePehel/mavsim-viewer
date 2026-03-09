@@ -18,9 +18,13 @@ extern const vehicle_model_info_t vehicle_models[];
 extern const int vehicle_model_count;
 
 // Default model indices (match vehicle_models[] order in vehicle.c)
-#define MODEL_MULTICOPTER 0
+#define MODEL_QUADROTOR   0
 #define MODEL_FIXEDWING   1
 #define MODEL_TAILSITTER  2
+#define MODEL_FPV_QUAD    3
+#define MODEL_HEXAROTOR   4
+#define MODEL_VTOL        5
+#define MODEL_ROVER       6
 
 typedef struct {
     Model model;
@@ -49,14 +53,17 @@ typedef struct {
     float *trail_roll;           // roll angle at each trail sample
     float *trail_pitch;          // pitch angle at each trail sample
     float *trail_vert;           // vertical speed at each trail sample
+    float *trail_speed;          // ground speed (m/s) at each trail sample
     int trail_count;
     int trail_head;
     int trail_capacity;
     float trail_timer;
+    Shader lighting_shader;  // shared lighting shader (id=0 if none)
+    int loc_matNormal;       // shader uniform for normal matrix
 } vehicle_t;
 
-// Initialize vehicle state and load the model at model_idx.
-void vehicle_init(vehicle_t *v, int model_idx);
+// Initialize vehicle state and load the model at model_idx. shader is optional lighting shader (id=0 to skip).
+void vehicle_init(vehicle_t *v, int model_idx, Shader lighting_shader);
 
 // Swap to a different model at runtime (unloads old, loads new).
 void vehicle_load_model(vehicle_t *v, int model_idx);
@@ -67,8 +74,9 @@ void vehicle_cycle_model(vehicle_t *v);
 // Update position/rotation from HIL_STATE_QUATERNION data.
 void vehicle_update(vehicle_t *v, const hil_state_t *state);
 
-// Draw the vehicle model. Pass view mode for per-mode coloring and selected state.
-void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected);
+// trail_mode: 0=off, 1=normal trail, 2=speed ribbon
+void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
+                  int trail_mode, bool show_ground_track, Vector3 cam_pos);
 
 // Reset the path trail.
 void vehicle_reset_trail(vehicle_t *v);
