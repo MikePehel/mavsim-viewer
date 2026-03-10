@@ -50,6 +50,7 @@ if(NOT BUILD_TESTING_ONLY)
         src/hud.c
         src/debug_panel.c
         src/ortho_panel.c
+        src/asset_path.c
     )
 
     target_include_directories(mavsim-viewer PRIVATE
@@ -85,4 +86,35 @@ if(NOT BUILD_TESTING_ONLY)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_SOURCE_DIR}/textures $<TARGET_FILE_DIR:mavsim-viewer>/textures
     )
+
+    # Install rules
+    include(GNUInstallDirs)
+
+    target_compile_definitions(mavsim-viewer PRIVATE
+        MAVSIM_INSTALL_DATADIR="${CMAKE_INSTALL_FULL_DATADIR}/mavsim-viewer")
+
+    install(TARGETS mavsim-viewer RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(DIRECTORY models/ DESTINATION ${CMAKE_INSTALL_DATADIR}/mavsim-viewer/models
+            FILES_MATCHING PATTERN "*.obj" PATTERN "*.mtl")
+    install(DIRECTORY shaders/ DESTINATION ${CMAKE_INSTALL_DATADIR}/mavsim-viewer/shaders
+            FILES_MATCHING PATTERN "*.vs" PATTERN "*.fs")
+    install(DIRECTORY fonts/ DESTINATION ${CMAKE_INSTALL_DATADIR}/mavsim-viewer/fonts
+            FILES_MATCHING PATTERN "*.ttf")
+    install(DIRECTORY textures/ DESTINATION ${CMAKE_INSTALL_DATADIR}/mavsim-viewer/textures
+            FILES_MATCHING PATTERN "*.png")
+    install(FILES fonts/OFL.txt DESTINATION ${CMAKE_INSTALL_DATADIR}/mavsim-viewer/fonts)
+
+    # CPack packaging
+    set(CPACK_PACKAGE_NAME "mavsim-viewer")
+    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "3D MAVLink vehicle viewer for SITL simulation")
+    set(CPACK_PACKAGE_CONTACT "https://github.com/mavlink/mavsim-viewer")
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS
+        "libgl1, libx11-6, libxrandr2, libxinerama1, libxcursor1, libxi6")
+    set(CPACK_DEBIAN_PACKAGE_SECTION "science")
+    set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+    if(DEFINED MAVSIM_VERSION)
+        set(CPACK_PACKAGE_VERSION "${MAVSIM_VERSION}")
+    endif()
+    include(CPack)
 endif()
