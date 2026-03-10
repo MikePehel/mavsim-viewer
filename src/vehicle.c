@@ -19,11 +19,12 @@
 // To add a new model: append an entry here and increment nothing else.
 const vehicle_model_info_t vehicle_models[] = {
     //  path                                name            scale  pitch    yaw       group
-    { "models/px4_quadrotor.obj",         "Quadrotor",    1.0f,    0.0f,   0.0f,   GROUP_QUAD },
+    { "models/px4_quadrotor.obj",         "Quadrotor",    1.0f,    0.0f, 180.0f,   GROUP_QUAD },
     { "models/cessna.obj",                "Fixed-wing",   1.33f,   0.0f,  90.0f,   GROUP_FIXED_WING },
     { "models/x_vert.obj",                "Tailsitter",   1.0f,  -90.0f,  90.0f,   GROUP_TAILSITTER },
     { "models/fpv_quadrotor.obj",         "FPV Quad",     0.75f,   0.0f,   0.0f,   GROUP_QUAD },
-    { "models/px4_hexarotor.obj",         "Hexarotor",    1.05f,   0.0f,   0.0f,   GROUP_HEX },
+    { "models/px4_hexarotor.obj",          "Hexarotor",    0.9f,    0.0f,   0.0f,   GROUP_HEX },
+    { "models/fpv_hexarotor.obj",         "FPV Hex",      0.85f,   0.0f,   0.0f,   GROUP_HEX },
     { "models/vtol_wing.obj",             "VTOL",         1.5f,    0.0f, 180.0f,   GROUP_VTOL },
     { "models/rover_4.obj",              "Rover",        1.0f,    0.0f,   0.0f,   GROUP_ROVER },
 };
@@ -33,16 +34,34 @@ const int vehicle_model_count = sizeof(vehicle_models) / sizeof(vehicle_models[0
 // Heuristic color detection works across OBJ models with standard MTL colors.
 static void remap_materials(vehicle_t *v) {
     v->red_material_idx = -1;
+    v->green_material_idx = -1;
+    v->front_material_idx = -1;
+    v->back_material_idx = -1;
     for (int i = 0; i < v->model.materialCount; i++) {
         Color *c = &v->model.materials[i].maps[MATERIAL_MAP_DIFFUSE].color;
-        // Blue_Metal → #272fc5
-        if (c->b > 100 && c->r < 50)
-            *c = (Color){ 39, 47, 197, 255 };
-        // Red_Metal → #ff2f2b
+        // Yellow_Metal (front arms) → #FFC832 — matches Grid trail forward
+        if (c->r > 200 && c->g > 100 && c->b < 100) {
+            *c = (Color){ 255, 200, 50, 255 };
+            v->front_material_idx = i;
+        }
+        // Purple_Metal (back arms) → #A03CFF — matches Grid trail backward
+        else if (c->b > 200 && c->r > 100 && c->g < 100) {
+            *c = (Color){ 160, 60, 255, 255 };
+            v->back_material_idx = i;
+        }
+        // Green_Metal (starboard/side arms) → #29FF4F
+        else if (c->g > 200 && c->r < 100 && c->b < 100) {
+            *c = (Color){ 41, 255, 79, 255 };
+            v->green_material_idx = i;
+        }
+        // Red_Metal (port/side arms) → #CC2121
         else if (c->r > 100 && c->g < 50 && c->b < 50) {
-            *c = (Color){ 255, 47, 43, 255 };
+            *c = (Color){ 204, 33, 33, 255 };
             v->red_material_idx = i;
         }
+        // Blue_Metal (legacy) → #272fc5
+        else if (c->b > 100 && c->r < 50)
+            *c = (Color){ 39, 47, 197, 255 };
         // Gray_Plastic (props) → #5075a2
         else if (c->r > 60 && c->r < 140 && c->g > 60 && c->g < 140)
             *c = (Color){ 80, 117, 162, 255 };
@@ -228,6 +247,9 @@ void vehicle_init(vehicle_t *v, int model_idx, Shader lighting_shader) {
     v->origin_set = false;
     v->active = false;
     v->red_material_idx = -1;
+    v->green_material_idx = -1;
+    v->front_material_idx = -1;
+    v->back_material_idx = -1;
     v->color = WHITE;
     v->trail = (Vector3 *)calloc(TRAIL_MAX, sizeof(Vector3));
     v->trail_roll = (float *)calloc(TRAIL_MAX, sizeof(float));
@@ -364,18 +386,91 @@ void vehicle_update(vehicle_t *v, const hil_state_t *state, const home_position_
 }
 
 void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
-                  int trail_mode, bool show_ground_track, Vector3 cam_pos) {
-    // In Rez/1988/Snow mode, swap red arm color
-    Color saved_red = {0};
-    if ((view_mode == VIEW_REZ || view_mode == VIEW_1988 || view_mode == VIEW_SNOW) && v->red_material_idx >= 0) {
-        Color *c = &v->model.materials[v->red_material_idx].maps[MATERIAL_MAP_DIFFUSE].color;
-        saved_red = *c;
-        if (view_mode == VIEW_1988)
-            *c = (Color){ 255, 20, 100, 255 }; // hot pink
-        else if (view_mode == VIEW_SNOW)
-            *c = (Color){ 200, 30, 30, 255 }; // bold red on white
-        else
-            *c = (Color){ 255, 106, 0, 255 }; // #ff6a00 orange
+                  int trail_mode, bool show_ground_track, Vector3 cam_pos,
+                  bool classic_colors) {
+    // Per-mode arm recoloring: front/back arms match trail forward/backward colors
+    Color saved_front = {0}, saved_back = {0}, saved_red = {0}, saved_green = {0};
+    bool recolor_arms = true;
+    if (recolor_arms) {
+        Color front_col, back_col, side_col, red_col = {0}, green_col = {0};
+        if (classic_colors) {
+            // Classic: red front, blue back, body-dark sides (light grey for VTOL winglets)
+            Color classic_side = (Color){ 14, 31, 47, 255 };  // body dark
+            if (view_mode == VIEW_1988) {
+                front_col = (Color){ 255,  20, 100, 255 };  // hot pink
+                back_col  = (Color){  39,  47, 197, 255 };  // blue
+            } else if (view_mode == VIEW_REZ) {
+                front_col = (Color){ 255, 106,   0, 255 };  // orange-red
+                back_col  = (Color){  39,  47, 197, 255 };  // blue
+            } else if (view_mode == VIEW_SNOW) {
+                front_col = (Color){ 200,  30,  30, 255 };  // bold red
+                back_col  = (Color){  30,  60, 180, 255 };  // blue
+                classic_side = (Color){ 160, 160, 170, 255 }; // light grey
+            } else {
+                front_col = (Color){ 255,  47,  43, 255 };  // red
+                back_col  = (Color){  39,  47, 197, 255 };  // blue
+            }
+            side_col = classic_side;
+        } else {
+            // Modern: yellow front, purple back, red port, green starboard
+            if (view_mode == VIEW_1988) {
+                front_col = (Color){ 255, 220,  60, 255 };  // warm yellow
+                back_col  = (Color){ 180,  40, 255, 255 };  // violet
+                red_col   = (Color){ 255,  20, 100, 255 };  // hot pink
+                green_col = (Color){  40, 255, 100, 255 };  // neon green
+            } else if (view_mode == VIEW_REZ) {
+                front_col = (Color){ 220, 180,  30, 255 };  // muted gold
+                back_col  = (Color){ 160,  40, 240, 255 };  // purple
+                red_col   = (Color){ 255, 106,   0, 255 };  // orange-red
+                green_col = (Color){  30, 200,  80, 255 };  // muted green
+            } else if (view_mode == VIEW_SNOW) {
+                front_col = (Color){ 200, 140,  20, 255 };  // dark amber
+                back_col  = (Color){ 140,  20, 200, 255 };  // purple
+                red_col   = (Color){ 180,  30,  30, 255 };  // dark red
+                green_col = (Color){  20, 160,  50, 255 };  // dark green
+            } else {
+                front_col = (Color){ 255, 200,  50, 255 };  // yellow
+                back_col  = (Color){ 160,  60, 255, 255 };  // purple
+                red_col   = (Color){ 204,  33,  33, 255 };  // red
+                green_col = (Color){  41, 255,  79, 255 };  // green
+            }
+            side_col = (Color){ 0, 0, 0, 0 };  // unused in modern
+        }
+        if (v->front_material_idx >= 0) {
+            Color *c = &v->model.materials[v->front_material_idx].maps[MATERIAL_MAP_DIFFUSE].color;
+            saved_front = *c;
+            *c = front_col;
+        }
+        if (v->back_material_idx >= 0) {
+            Color *c = &v->model.materials[v->back_material_idx].maps[MATERIAL_MAP_DIFFUSE].color;
+            saved_back = *c;
+            *c = back_col;
+        }
+        if (classic_colors) {
+            // In classic mode, sides become body-dark (or light grey for VTOL)
+            if (v->red_material_idx >= 0) {
+                Color *c = &v->model.materials[v->red_material_idx].maps[MATERIAL_MAP_DIFFUSE].color;
+                saved_red = *c;
+                *c = side_col;
+            }
+            if (v->green_material_idx >= 0) {
+                Color *c = &v->model.materials[v->green_material_idx].maps[MATERIAL_MAP_DIFFUSE].color;
+                saved_green = *c;
+                *c = side_col;
+            }
+        } else {
+            // Modern: per-view-mode red/green
+            if (v->red_material_idx >= 0) {
+                Color *c = &v->model.materials[v->red_material_idx].maps[MATERIAL_MAP_DIFFUSE].color;
+                saved_red = *c;
+                *c = red_col;
+            }
+            if (v->green_material_idx >= 0) {
+                Color *c = &v->model.materials[v->green_material_idx].maps[MATERIAL_MAP_DIFFUSE].color;
+                saved_green = *c;
+                *c = green_col;
+            }
+        }
     }
     // OBJ model: flat in XY, thin in Z (Z is model's up).
     // Raylib: Y is up. Rotate +90° around X so model Z → Raylib Y,
@@ -411,7 +506,7 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
         Color trail_color;
         Color col_back, col_up, col_down, col_roll_pos, col_roll_neg;
         if (view_mode == VIEW_SNOW) {
-            trail_color  = (Color){  20,  80, 200, 200 };  // bold blue
+            trail_color  = (Color){ 200, 140,  20, 200 };  // dark amber
             col_back     = (Color){ 140,  20, 200, 255 };  // purple
             col_up       = (Color){   0, 150,  60, 255 };  // dark green
             col_down     = (Color){ 200,  50,   0, 255 };  // dark red
@@ -425,7 +520,7 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
             col_roll_pos = (Color){  40, 255,  80, 255 };  // green (starboard)
             col_roll_neg = (Color){ 255,  40,  80, 255 };  // red (port)
         } else if (view_mode == VIEW_REZ) {
-            trail_color  = (Color){   0, 255, 200, 160 };  // teal forward
+            trail_color  = (Color){ 220, 180,  30, 160 };  // muted gold forward
             col_back     = (Color){ 160,  40, 240, 255 };  // purple
             col_up       = (Color){   0, 200, 255, 255 };  // cyan
             col_down     = (Color){ 255, 160,   0, 255 };  // amber
@@ -439,9 +534,10 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
             col_roll_pos = (Color){  40, 255,  80, 255 };  // green (starboard)
             col_roll_neg = (Color){ 255,  40,  80, 255 };  // red (port)
         }
+        bool thick = (view_mode == VIEW_SNOW);
 
-        // Batched line trail: single rlBegin/rlEnd instead of per-segment DrawLine3D
-        rlBegin(RL_LINES);
+        // Batched trail: single rlBegin/rlEnd instead of per-segment DrawLine3D
+        rlBegin(thick ? RL_TRIANGLES : RL_LINES);
         for (int i = 1; i < v->trail_count; i++) {
             int idx0 = (start + i - 1) % v->trail_capacity;
             int idx1 = (start + i) % v->trail_capacity;
@@ -495,8 +591,27 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
             unsigned char ccb = (unsigned char)(cb > 255 ? 255 : cb);
             unsigned char ca  = (unsigned char)(t * trail_color.a);
             rlColor4ub(ccr, ccg, ccb, ca);
-            rlVertex3f(v->trail[idx0].x, v->trail[idx0].y, v->trail[idx0].z);
-            rlVertex3f(v->trail[idx1].x, v->trail[idx1].y, v->trail[idx1].z);
+            if (!thick) {
+                rlVertex3f(v->trail[idx0].x, v->trail[idx0].y, v->trail[idx0].z);
+                rlVertex3f(v->trail[idx1].x, v->trail[idx1].y, v->trail[idx1].z);
+            } else {
+                // Flat ribbon for better visibility in snow mode
+                Vector3 seg = Vector3Subtract(v->trail[idx1], v->trail[idx0]);
+                Vector3 up = {0, 1, 0};
+                Vector3 perp = Vector3CrossProduct(seg, up);
+                float plen = Vector3Length(perp);
+                if (plen < 0.001f) continue;
+                float hw = 0.013f;
+                perp = Vector3Scale(perp, hw / plen);
+                Vector3 a = Vector3Add(v->trail[idx0], perp);
+                Vector3 b = Vector3Subtract(v->trail[idx0], perp);
+                Vector3 d = Vector3Add(v->trail[idx1], perp);
+                Vector3 e = Vector3Subtract(v->trail[idx1], perp);
+                rlVertex3f(a.x, a.y, a.z); rlVertex3f(b.x, b.y, b.z); rlVertex3f(d.x, d.y, d.z);
+                rlVertex3f(b.x, b.y, b.z); rlVertex3f(e.x, e.y, e.z); rlVertex3f(d.x, d.y, d.z);
+                rlVertex3f(d.x, d.y, d.z); rlVertex3f(b.x, b.y, b.z); rlVertex3f(a.x, a.y, a.z);
+                rlVertex3f(d.x, d.y, d.z); rlVertex3f(e.x, e.y, e.z); rlVertex3f(b.x, b.y, b.z);
+            }
         }
         rlEnd();
       } else {
@@ -656,9 +771,16 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
         }
     }
 
-    // Restore original color
-    if ((view_mode == VIEW_REZ || view_mode == VIEW_1988 || view_mode == VIEW_SNOW) && v->red_material_idx >= 0) {
-        v->model.materials[v->red_material_idx].maps[MATERIAL_MAP_DIFFUSE].color = saved_red;
+    // Restore original colors
+    if (recolor_arms) {
+        if (v->front_material_idx >= 0)
+            v->model.materials[v->front_material_idx].maps[MATERIAL_MAP_DIFFUSE].color = saved_front;
+        if (v->back_material_idx >= 0)
+            v->model.materials[v->back_material_idx].maps[MATERIAL_MAP_DIFFUSE].color = saved_back;
+        if (v->red_material_idx >= 0)
+            v->model.materials[v->red_material_idx].maps[MATERIAL_MAP_DIFFUSE].color = saved_red;
+        if (v->green_material_idx >= 0)
+            v->model.materials[v->green_material_idx].maps[MATERIAL_MAP_DIFFUSE].color = saved_green;
     }
 }
 
