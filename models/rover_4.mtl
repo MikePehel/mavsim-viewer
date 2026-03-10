@@ -1,4 +1,4 @@
-# rover_4 materials (MAVSim spec Kd values)
+# px4_modern_rover materials (MAVSim spec Kd values)
 
 newmtl Body_Dark
 Kd 0.0500 0.0700 0.0900
@@ -35,15 +35,15 @@ Ks 0.0000 0.0000 0.0000
 Ns 10
 d 1.00
 
-newmtl Blue_Metal
-Kd 0.1000 0.2300 0.8000
+newmtl Yellow_Metal
+Kd 1.0000 0.7800 0.2000
 Ka 0.0200 0.0200 0.0200
 Ks 0.0000 0.0000 0.0000
 Ns 10
 d 1.00
 
-newmtl Red_Metal
-Kd 0.8000 0.1300 0.1300
+newmtl Purple_Metal
+Kd 0.6300 0.2400 1.0000
 Ka 0.0200 0.0200 0.0200
 Ks 0.0000 0.0000 0.0000
 Ns 10

@@ -167,7 +167,11 @@ int main(int argc, char *argv[]) {
             }
             was_connected[i] = receivers[i].connected;
 
-            vehicle_update(&vehicles[i], &receivers[i].state, &receivers[i].home);
+            if (receivers[i].connected) {
+                vehicle_update(&vehicles[i], &receivers[i].state, &receivers[i].home);
+            } else {
+                vehicle_manual_control(&vehicles[i], GetFrameTime());
+            }
             vehicles[i].sysid = receivers[i].sysid;
 
             // Detect position jump (new SITL connecting before disconnect timeout)
@@ -223,9 +227,14 @@ int main(int argc, char *argv[]) {
             ortho.visible = !ortho.visible;
         }
 
-        // Cycle model for selected vehicle
+        // Cycle model: M = within group, Shift+M = all models
         if (IsKeyPressed(KEY_M)) {
-            vehicle_cycle_model(&vehicles[selected]);
+            if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) {
+                int next = (vehicles[selected].model_idx + 1) % vehicle_model_count;
+                vehicle_load_model(&vehicles[selected], next);
+            } else {
+                vehicle_cycle_model(&vehicles[selected]);
+            }
         }
 
         // Vehicle selection input

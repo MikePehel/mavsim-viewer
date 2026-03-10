@@ -18,11 +18,12 @@
 // To add a new model: append an entry here and increment nothing else.
 const vehicle_model_info_t vehicle_models[] = {
     //  path                                name            scale  pitch    yaw       group
-    { "models/px4_quadrotor.obj",         "Quadrotor",    1.0f,    0.0f,   0.0f,   GROUP_QUAD },
+    { "models/px4_quadrotor.obj",         "Quadrotor",    1.0f,    0.0f, 180.0f,   GROUP_QUAD },
     { "models/cessna.obj",                "Fixed-wing",   1.33f,   0.0f,  90.0f,   GROUP_FIXED_WING },
     { "models/x_vert.obj",                "Tailsitter",   1.0f,  -90.0f,  90.0f,   GROUP_TAILSITTER },
-    { "models/fpv_quadrotor.obj",         "FPV Quad",     0.75f,   0.0f,   0.0f,   GROUP_QUAD },
-    { "models/px4_hexarotor.obj",         "Hexarotor",    1.05f,   0.0f,   0.0f,   GROUP_HEX },
+    { "models/fpv_quadrotor.obj",         "FPV Quad",     0.75f,   0.0f, 180.0f,   GROUP_QUAD },
+    { "models/px4_hexarotor.obj",          "Hexarotor",    0.9f,    0.0f,   0.0f,   GROUP_HEX },
+    { "models/fpv_hexarotor.obj",         "FPV Hex",      0.85f,   0.0f,   0.0f,   GROUP_HEX },
     { "models/vtol_wing.obj",             "VTOL",         1.5f,    0.0f, 180.0f,   GROUP_VTOL },
     { "models/rover_4.obj",              "Rover",        1.0f,    0.0f,   0.0f,   GROUP_ROVER },
 };
@@ -32,16 +33,31 @@ const int vehicle_model_count = sizeof(vehicle_models) / sizeof(vehicle_models[0
 // Heuristic color detection works across OBJ models with standard MTL colors.
 static void remap_materials(vehicle_t *v) {
     v->red_material_idx = -1;
+    v->front_material_idx = -1;
+    v->back_material_idx = -1;
     for (int i = 0; i < v->model.materialCount; i++) {
         Color *c = &v->model.materials[i].maps[MATERIAL_MAP_DIFFUSE].color;
-        // Blue_Metal → #272fc5
-        if (c->b > 100 && c->r < 50)
-            *c = (Color){ 39, 47, 197, 255 };
-        // Red_Metal → #ff2f2b
+        // Yellow_Metal (front arms) → #FFC832 — matches Grid trail forward
+        if (c->r > 200 && c->g > 100 && c->b < 100) {
+            *c = (Color){ 255, 200, 50, 255 };
+            v->front_material_idx = i;
+        }
+        // Purple_Metal (back arms) → #A03CFF — matches Grid trail backward
+        else if (c->b > 200 && c->r > 100 && c->g < 100) {
+            *c = (Color){ 160, 60, 255, 255 };
+            v->back_material_idx = i;
+        }
+        // Green_Metal (starboard/side arms) → #29FF4F
+        else if (c->g > 200 && c->r < 100 && c->b < 100)
+            *c = (Color){ 41, 255, 79, 255 };
+        // Red_Metal (port/side arms) → #CC2121
         else if (c->r > 100 && c->g < 50 && c->b < 50) {
-            *c = (Color){ 255, 47, 43, 255 };
+            *c = (Color){ 204, 33, 33, 255 };
             v->red_material_idx = i;
         }
+        // Blue_Metal (legacy) → #272fc5
+        else if (c->b > 100 && c->r < 50)
+            *c = (Color){ 39, 47, 197, 255 };
         // Gray_Plastic (props) → #5075a2
         else if (c->r > 60 && c->r < 140 && c->g > 60 && c->g < 140)
             *c = (Color){ 80, 117, 162, 255 };
@@ -104,6 +120,9 @@ void vehicle_set_type(vehicle_t *v, uint8_t mav_type) {
             default_model = MODEL_QUADROTOR;
             break;
         case 13: // MAV_TYPE_HEXAROTOR
+            group = GROUP_HEX;
+            default_model = MODEL_HEXAROTOR;
+            break;
         case 14: // MAV_TYPE_OCTOROTOR
             group = GROUP_HEX;
             default_model = MODEL_HEXAROTOR;
@@ -225,6 +244,8 @@ void vehicle_init(vehicle_t *v, int model_idx, Shader lighting_shader) {
     v->origin_set = false;
     v->active = false;
     v->red_material_idx = -1;
+    v->front_material_idx = -1;
+    v->back_material_idx = -1;
     v->color = WHITE;
     v->trail = (Vector3 *)calloc(TRAIL_MAX, sizeof(Vector3));
     v->trail_roll = (float *)calloc(TRAIL_MAX, sizeof(float));
@@ -362,17 +383,45 @@ void vehicle_update(vehicle_t *v, const hil_state_t *state, const home_position_
 
 void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
                   int trail_mode, bool show_ground_track, Vector3 cam_pos) {
-    // In Rez/1988/Snow mode, swap red arm color
-    Color saved_red = {0};
-    if ((view_mode == VIEW_REZ || view_mode == VIEW_1988 || view_mode == VIEW_SNOW) && v->red_material_idx >= 0) {
-        Color *c = &v->model.materials[v->red_material_idx].maps[MATERIAL_MAP_DIFFUSE].color;
-        saved_red = *c;
-        if (view_mode == VIEW_1988)
-            *c = (Color){ 255, 20, 100, 255 }; // hot pink
-        else if (view_mode == VIEW_SNOW)
-            *c = (Color){ 200, 30, 30, 255 }; // bold red on white
-        else
-            *c = (Color){ 255, 106, 0, 255 }; // #ff6a00 orange
+    // Per-mode arm recoloring: front/back arms match trail forward/backward colors
+    Color saved_front = {0}, saved_back = {0}, saved_red = {0};
+    bool recolor_arms = (view_mode != VIEW_GRID);
+    if (recolor_arms) {
+        Color front_col, back_col;
+        if (view_mode == VIEW_1988) {
+            front_col = (Color){ 255, 220,  60, 255 };  // warm yellow
+            back_col  = (Color){ 180,  40, 255, 255 };  // violet
+        } else if (view_mode == VIEW_REZ) {
+            front_col = (Color){ 220, 180,  30, 255 };  // muted gold
+            back_col  = (Color){ 160,  40, 240, 255 };  // purple
+        } else if (view_mode == VIEW_SNOW) {
+            front_col = (Color){ 200, 140,  20, 255 };  // dark amber
+            back_col  = (Color){ 140,  20, 200, 255 };  // purple
+        } else {
+            front_col = (Color){ 255, 200,  50, 255 };  // yellow (default)
+            back_col  = (Color){ 160,  60, 255, 255 };  // purple (default)
+        }
+        if (v->front_material_idx >= 0) {
+            Color *c = &v->model.materials[v->front_material_idx].maps[MATERIAL_MAP_DIFFUSE].color;
+            saved_front = *c;
+            *c = front_col;
+        }
+        if (v->back_material_idx >= 0) {
+            Color *c = &v->model.materials[v->back_material_idx].maps[MATERIAL_MAP_DIFFUSE].color;
+            saved_back = *c;
+            *c = back_col;
+        }
+        // Legacy red arms (other models)
+        if (v->red_material_idx >= 0) {
+            Color *c = &v->model.materials[v->red_material_idx].maps[MATERIAL_MAP_DIFFUSE].color;
+            saved_red = *c;
+            if (view_mode == VIEW_1988)
+                *c = (Color){ 255, 20, 100, 255 };
+            else if (view_mode == VIEW_SNOW)
+                *c = (Color){ 200, 30, 30, 255 };
+            else
+                *c = (Color){ 255, 106, 0, 255 };
+        }
     }
     // OBJ model: flat in XY, thin in Z (Z is model's up).
     // Raylib: Y is up. Rotate +90° around X so model Z → Raylib Y,
@@ -408,7 +457,7 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
         Color trail_color;
         Color col_back, col_up, col_down, col_roll_pos, col_roll_neg;
         if (view_mode == VIEW_SNOW) {
-            trail_color  = (Color){  20,  80, 200, 200 };  // bold blue
+            trail_color  = (Color){ 200, 140,  20, 200 };  // dark amber
             col_back     = (Color){ 140,  20, 200, 255 };  // purple
             col_up       = (Color){   0, 150,  60, 255 };  // dark green
             col_down     = (Color){ 200,  50,   0, 255 };  // dark red
@@ -422,7 +471,7 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
             col_roll_pos = (Color){  40, 255,  80, 255 };  // green (starboard)
             col_roll_neg = (Color){ 255,  40,  80, 255 };  // red (port)
         } else if (view_mode == VIEW_REZ) {
-            trail_color  = (Color){   0, 255, 200, 160 };  // teal forward
+            trail_color  = (Color){ 220, 180,  30, 160 };  // muted gold forward
             col_back     = (Color){ 160,  40, 240, 255 };  // purple
             col_up       = (Color){   0, 200, 255, 255 };  // cyan
             col_down     = (Color){ 255, 160,   0, 255 };  // amber
@@ -436,6 +485,8 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
             col_roll_pos = (Color){  40, 255,  80, 255 };  // green (starboard)
             col_roll_neg = (Color){ 255,  40,  80, 255 };  // red (port)
         }
+
+        bool thick = (view_mode == VIEW_SNOW);
 
         for (int i = 1; i < v->trail_count; i++) {
             int idx0 = (start + i - 1) % v->trail_capacity;
@@ -490,7 +541,29 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
             c.g = (unsigned char)(cg > 255 ? 255 : cg);
             c.b = (unsigned char)(cb > 255 ? 255 : cb);
             c.a = (unsigned char)(t * trail_color.a);
-            DrawLine3D(v->trail[idx0], v->trail[idx1], c);
+            if (!thick) {
+                DrawLine3D(v->trail[idx0], v->trail[idx1], c);
+            } else {
+                // Flat ribbon for better visibility
+                Vector3 seg = Vector3Subtract(v->trail[idx1], v->trail[idx0]);
+                Vector3 up = {0, 1, 0};
+                Vector3 perp = Vector3CrossProduct(seg, up);
+                float plen = Vector3Length(perp);
+                if (plen < 0.001f) {
+                    DrawLine3D(v->trail[idx0], v->trail[idx1], c);
+                } else {
+                    float hw = 0.013f;  // half-width in meters
+                    perp = Vector3Scale(perp, hw / plen);
+                    Vector3 a = Vector3Add(v->trail[idx0], perp);
+                    Vector3 b = Vector3Subtract(v->trail[idx0], perp);
+                    Vector3 d = Vector3Add(v->trail[idx1], perp);
+                    Vector3 e = Vector3Subtract(v->trail[idx1], perp);
+                    DrawTriangle3D(a, b, d, c);
+                    DrawTriangle3D(b, e, d, c);
+                    DrawTriangle3D(d, b, a, c);
+                    DrawTriangle3D(d, e, b, c);
+                }
+            }
         }
       } else {
         // ── Speed ribbon trail (mode 2) ──
@@ -644,9 +717,114 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
         }
     }
 
-    // Restore original color
-    if ((view_mode == VIEW_REZ || view_mode == VIEW_1988 || view_mode == VIEW_SNOW) && v->red_material_idx >= 0) {
-        v->model.materials[v->red_material_idx].maps[MATERIAL_MAP_DIFFUSE].color = saved_red;
+    // Restore original colors
+    if (recolor_arms) {
+        if (v->front_material_idx >= 0)
+            v->model.materials[v->front_material_idx].maps[MATERIAL_MAP_DIFFUSE].color = saved_front;
+        if (v->back_material_idx >= 0)
+            v->model.materials[v->back_material_idx].maps[MATERIAL_MAP_DIFFUSE].color = saved_back;
+        if (v->red_material_idx >= 0)
+            v->model.materials[v->red_material_idx].maps[MATERIAL_MAP_DIFFUSE].color = saved_red;
+    }
+}
+
+void vehicle_manual_control(vehicle_t *v, float dt) {
+    v->active = true;
+    float speed = 10.0f;
+    if (IsKeyDown(KEY_LEFT_SHIFT)) speed = 30.0f;
+
+    float yaw_rad = v->heading_deg * DEG2RAD;
+    // Raylib: -Z is forward at heading=0, X is right
+    float fwd_x = sinf(yaw_rad);
+    float fwd_z = -cosf(yaw_rad);
+
+    // Movement: accumulate desired velocity, then apply drag for smooth curves
+    bool moving_fwd = IsKeyDown(KEY_W);
+    bool moving_back = IsKeyDown(KEY_S);
+    bool moving_left = IsKeyDown(KEY_A);
+    bool moving_right = IsKeyDown(KEY_D);
+    bool moving_up = IsKeyDown(KEY_E);
+    bool moving_down = IsKeyDown(KEY_Q);
+
+    // Target velocity from input
+    float accel = speed * 4.0f;  // acceleration rate
+    float drag = 3.0f;           // drag coefficient (higher = more damping)
+
+    float target_vx = 0.0f, target_vy = 0.0f, target_vz = 0.0f;
+    if (moving_fwd)   { target_vx += fwd_x * speed; target_vz += fwd_z * speed; }
+    if (moving_back)  { target_vx -= fwd_x * speed; target_vz -= fwd_z * speed; }
+    if (moving_left)  { target_vx += fwd_z * speed; target_vz -= fwd_x * speed; }
+    if (moving_right) { target_vx -= fwd_z * speed; target_vz += fwd_x * speed; }
+    if (moving_up)    target_vy = speed;
+    if (moving_down)  target_vy = -speed;
+
+    // Smooth velocity with drag (exponential approach to target)
+    static float vel_x = 0, vel_y = 0, vel_z = 0;
+    float blend = 1.0f - expf(-drag * dt);
+    vel_x += (target_vx - vel_x) * blend;
+    vel_y += (target_vy - vel_y) * blend;
+    vel_z += (target_vz - vel_z) * blend;
+
+    v->position.x += vel_x * dt;
+    v->position.y += vel_y * dt;
+    v->position.z += vel_z * dt;
+    if (v->position.y < 0.0f) { v->position.y = 0.0f; vel_y = 0.0f; }
+
+    // Yaw with arrow keys (LEFT = turn left = heading decreases in CW convention)
+    if (IsKeyDown(KEY_LEFT))  v->heading_deg += 90.0f * dt;
+    if (IsKeyDown(KEY_RIGHT)) v->heading_deg -= 90.0f * dt;
+    if (v->heading_deg < 0.0f) v->heading_deg += 360.0f;
+    if (v->heading_deg >= 360.0f) v->heading_deg -= 360.0f;
+
+    // Auto-pitch: tilt nose down when moving forward, up when backward
+    float target_pitch = 0.0f;
+    if (moving_fwd) target_pitch = -15.0f;
+    if (moving_back) target_pitch = 15.0f;
+    // Arrow keys override for manual pitch
+    if (IsKeyDown(KEY_UP))   target_pitch = -30.0f;
+    if (IsKeyDown(KEY_DOWN)) target_pitch = 30.0f;
+    v->pitch_deg += (target_pitch - v->pitch_deg) * 5.0f * dt;
+
+    // Auto-roll: bank when strafing
+    float target_roll = 0.0f;
+    if (moving_left) target_roll = -25.0f;
+    if (moving_right) target_roll = 25.0f;
+    v->roll_deg += (target_roll - v->roll_deg) * 5.0f * dt;
+
+    // Build quaternion: NED-style → Raylib (Y-up, -Z forward)
+    // yaw around Y, pitch around X, roll around Z
+    Quaternion qy = QuaternionFromAxisAngle((Vector3){0, 1, 0}, -yaw_rad);
+    Quaternion qp = QuaternionFromAxisAngle((Vector3){1, 0, 0}, -v->pitch_deg * DEG2RAD);
+    Quaternion qr = QuaternionFromAxisAngle((Vector3){0, 0, 1}, v->roll_deg * DEG2RAD);
+    v->rotation = QuaternionMultiply(QuaternionMultiply(qy, qp), qr);
+
+    // Update telemetry from actual velocity
+    v->altitude_rel = v->position.y;
+    v->ground_speed = sqrtf(vel_x * vel_x + vel_z * vel_z);
+    v->vertical_speed = vel_y;
+
+    // Sample trail
+    float dist_since = 0.0f;
+    if (v->trail_count > 0) {
+        int last = (v->trail_head - 1 + v->trail_capacity) % v->trail_capacity;
+        float ddx = v->position.x - v->trail[last].x;
+        float ddy = v->position.y - v->trail[last].y;
+        float ddz = v->position.z - v->trail[last].z;
+        dist_since = sqrtf(ddx*ddx + ddy*ddy + ddz*ddz);
+    }
+    v->trail_timer += dt;
+    if (v->trail_timer >= TRAIL_INTERVAL || dist_since >= TRAIL_DIST_INTERVAL) {
+        v->trail_timer = 0.0f;
+        v->trail[v->trail_head] = v->position;
+        v->trail_roll[v->trail_head] = v->roll_deg;
+        v->trail_pitch[v->trail_head] = v->pitch_deg;
+        v->trail_vert[v->trail_head] = v->vertical_speed;
+        float spd = sqrtf(v->ground_speed * v->ground_speed +
+                          v->vertical_speed * v->vertical_speed);
+        v->trail_speed[v->trail_head] = spd;
+        if (spd > v->trail_speed_max) v->trail_speed_max = spd;
+        v->trail_head = (v->trail_head + 1) % v->trail_capacity;
+        if (v->trail_count < v->trail_capacity) v->trail_count++;
     }
 }
 
