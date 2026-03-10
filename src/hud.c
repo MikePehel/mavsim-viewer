@@ -1,5 +1,6 @@
 #include "hud.h"
 #include "asset_path.h"
+#include "ulog_replay.h"
 #include "raylib.h"
 #include "raymath.h"
 
@@ -496,6 +497,37 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
         // Playhead dot
         float dot_x = prog_x + prog_w * pb->progress;
         DrawCircle((int)dot_x, (int)(prog_y + prog_h / 2.0f), 3 * s, accent);
+
+        // Flight mode markers on timeline
+        if (pb->mode_changes && pb->mode_change_count > 0 && pb->duration_s > 0.0f) {
+            float fs_marker = 9 * s;
+            float last_label_x = -100.0f;  // track last drawn label to avoid overlap
+            for (int i = 0; i < pb->mode_change_count; i++) {
+                float t = pb->mode_changes[i].time_s / pb->duration_s;
+                if (t < 0.0f || t > 1.0f) continue;
+                float mx = prog_x + prog_w * t;
+
+                // Tick mark: white and on top once past, dim accent when ahead
+                bool past = (t <= pb->progress);
+                Color tick_col = past
+                    ? (Color){255, 255, 255, 220}
+                    : (Color){accent.r, accent.g, accent.b, 80};
+                DrawCircle((int)mx, (int)(prog_y + prog_h / 2.0f), 2 * s, tick_col);
+
+                // Label (skip if too close to previous label)
+                if (mx - last_label_x > 40 * s) {
+                    const char *name = ulog_nav_state_name(pb->mode_changes[i].nav_state);
+                    Vector2 tw = MeasureTextEx(h->font_label, name, fs_marker, 0.5f);
+                    float lx = mx - tw.x / 2.0f;
+                    if (lx < prog_x) lx = prog_x;
+                    if (lx + tw.x > prog_x + prog_w) lx = prog_x + prog_w - tw.x;
+                    DrawTextEx(h->font_label, name,
+                               (Vector2){lx, prog_y - tw.y - 2 * s},
+                               fs_marker, 0.5f, tick_col);
+                    last_label_x = mx;
+                }
+            }
+        }
 
         cx = prog_x + prog_w + 8 * s;
 
