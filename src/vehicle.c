@@ -22,7 +22,7 @@ const vehicle_model_info_t vehicle_models[] = {
     { "models/px4_quadrotor.obj",         "Quadrotor",    1.0f,    0.0f, 180.0f,   GROUP_QUAD },
     { "models/cessna.obj",                "Fixed-wing",   1.33f,   0.0f,  90.0f,   GROUP_FIXED_WING },
     { "models/x_vert.obj",                "Tailsitter",   1.0f,  -90.0f,  90.0f,   GROUP_TAILSITTER },
-    { "models/fpv_quadrotor.obj",         "FPV Quad",     0.75f,   0.0f, 180.0f,   GROUP_QUAD },
+    { "models/fpv_quadrotor.obj",         "FPV Quad",     0.75f,   0.0f,   0.0f,   GROUP_QUAD },
     { "models/px4_hexarotor.obj",          "Hexarotor",    0.9f,    0.0f,   0.0f,   GROUP_HEX },
     { "models/fpv_hexarotor.obj",         "FPV Hex",      0.85f,   0.0f,   0.0f,   GROUP_HEX },
     { "models/vtol_wing.obj",             "VTOL",         1.5f,    0.0f, 180.0f,   GROUP_VTOL },
