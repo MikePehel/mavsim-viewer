@@ -35,8 +35,9 @@ extern const int vehicle_model_count;
 #define MODEL_TAILSITTER  2
 #define MODEL_FPV_QUAD    3
 #define MODEL_HEXAROTOR   4
-#define MODEL_VTOL        5
-#define MODEL_ROVER       6
+#define MODEL_FPV_HEX     5
+#define MODEL_VTOL        6
+#define MODEL_ROVER       7
 
 typedef struct {
     Model model;
@@ -60,7 +61,10 @@ typedef struct {
     float vertical_speed;    // m/s (positive = climbing)
     float airspeed;          // m/s
     float altitude_rel;      // meters above origin
-    int red_material_idx;    // material index for red arms (-1 if not found)
+    int red_material_idx;    // material index for red/port arms (-1 if not found)
+    int green_material_idx;  // material index for green/starboard arms (-1 if not found)
+    int front_material_idx;  // material index for front arms (yellow, -1 if not found)
+    int back_material_idx;   // material index for back arms (purple, -1 if not found)
     uint8_t sysid;
     Color color;
     Vector3 *trail;
@@ -94,8 +98,10 @@ void vehicle_set_type(vehicle_t *v, uint8_t mav_type);
 void vehicle_update(vehicle_t *v, const hil_state_t *state, const home_position_t *home);
 
 // trail_mode: 0=off, 1=normal trail, 2=speed ribbon
+// classic_colors: false = modern (yellow/purple), true = classic (red/blue)
 void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
-                  int trail_mode, bool show_ground_track, Vector3 cam_pos);
+                  int trail_mode, bool show_ground_track, Vector3 cam_pos,
+                  bool classic_colors);
 
 // Reset the path trail.
 void vehicle_reset_trail(vehicle_t *v);

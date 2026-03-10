@@ -168,6 +168,7 @@ int main(int argc, char *argv[]) {
     bool show_hud = true;
     int trail_mode = 1;              // 0=off, 1=directional trail, 2=speed ribbon
     bool show_ground_track = false;  // ground projection off by default
+    bool classic_colors = false;     // L key: toggle classic (red/blue) vs modern (yellow/purple)
 
     // Main loop
     while (!WindowShouldClose()) {
@@ -228,6 +229,11 @@ int main(int argc, char *argv[]) {
             trail_mode = (trail_mode + 1) % 3;
         }
 
+        // Toggle classic/modern arm colors (L = legacy)
+        if (IsKeyPressed(KEY_L)) {
+            classic_colors = !classic_colors;
+        }
+
         // Toggle ground track projection
         if (IsKeyPressed(KEY_G)) {
             show_ground_track = !show_ground_track;
@@ -244,8 +250,14 @@ int main(int argc, char *argv[]) {
         }
 
         // Cycle model for selected vehicle
+        // Cycle model: M = within group, Shift+M = all models
         if (IsKeyPressed(KEY_M)) {
-            vehicle_cycle_model(&vehicles[selected]);
+            if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) {
+                int next = (vehicles[selected].model_idx + 1) % vehicle_model_count;
+                vehicle_load_model(&vehicles[selected], next);
+            } else {
+                vehicle_cycle_model(&vehicles[selected]);
+            }
         }
 
         // Vehicle selection input
@@ -405,7 +417,8 @@ int main(int argc, char *argv[]) {
                 for (int i = 0; i < vehicle_count; i++) {
                     if (vehicles[i].active || vehicle_count == 1) {
                         vehicle_draw(&vehicles[i], scene.view_mode, i == selected,
-                                     trail_mode, show_ground_track, scene.camera.position);
+                                     trail_mode, show_ground_track, scene.camera.position,
+                                     classic_colors);
                     }
                 }
             EndMode3D();
