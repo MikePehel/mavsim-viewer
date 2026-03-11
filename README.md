@@ -1,5 +1,7 @@
 # MAVSim Viewer
 
+[![Release](https://img.shields.io/github/v/release/mavlink/mavsim-viewer)](https://github.com/mavlink/mavsim-viewer/releases/latest)
+
 Lightweight 3D viewer for MAVLink-based flight simulators. Receives `HIL_STATE_QUATERNION` messages over UDP and renders the vehicle with real-time telemetry.
 
 Built with [Raylib](https://www.raylib.com/) and [MAVLink](https://mavlink.io/).
@@ -19,21 +21,61 @@ Built with [Raylib](https://www.raylib.com/) and [MAVLink](https://mavlink.io/).
 - **ULog replay** — play back PX4 `.ulg` flight logs with transport controls and interpolation
 - Cross-platform: macOS, Linux, and Windows supported out of the box thanks to Raylib
 
-## Requirements
+## Install
 
-- CMake 3.14+
-- C compiler (GCC, Clang, MSVC)
-- Git (for submodules and Raylib fetch)
-
-## Building
+### macOS (Homebrew)
 
 ```bash
-git clone --recursive git@github.com:mavlink/mavsim-viewer.git
-cd mavsim-viewer
-mkdir build && cd build
-cmake ..
-make -j$(nproc)
+brew tap mavlink/tap
+brew install mavlink/tap/mavsim-viewer
 ```
+
+### Linux (Debian/Ubuntu)
+
+Download the `.deb` from the [latest release](https://github.com/mavlink/mavsim-viewer/releases/latest):
+
+```bash
+sudo dpkg -i mavsim-viewer-*.deb
+```
+
+### From source
+
+#### macOS
+
+```bash
+# Install build tools
+brew install cmake git
+
+git clone --recursive https://github.com/mavlink/mavsim-viewer.git
+cd mavsim-viewer
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+#### Linux (Debian/Ubuntu)
+
+```bash
+# Install build tools and display server dependencies
+sudo apt-get install -y cmake git build-essential \
+  libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+
+git clone --recursive https://github.com/mavlink/mavsim-viewer.git
+cd mavsim-viewer
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+#### Windows
+
+```powershell
+# Requires Visual Studio with C/C++ workload, CMake, and Git
+git clone --recursive https://github.com/mavlink/mavsim-viewer.git
+cd mavsim-viewer
+cmake -B build
+cmake --build build --config Release
+```
+
+The binary will be at `build/Release/mavsim-viewer.exe`.
 
 ## Usage
 
