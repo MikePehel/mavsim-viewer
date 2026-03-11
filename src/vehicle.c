@@ -167,25 +167,25 @@ static Color heat_to_color(float heat, unsigned char alpha, view_mode_t mode) {
     float cr, cg, cb;
 
     if (mode == VIEW_1988) {
-        // 1988: purple → magenta → hot pink → orange → yellow → white
+        // 1988: deep purple → purple → magenta → hot pink → yellow → white
         if (heat < 0.16f) {
             float s = heat / 0.16f;
-            cr = 80 + 40 * s; cg = 10 * s; cb = 140 + 40 * s;
+            cr = 60 + 40 * s; cg = 5 + 5 * s; cb = 120 + 40 * s;
         } else if (heat < 0.33f) {
             float s = (heat - 0.16f) / 0.17f;
-            cr = 120 + 80 * s; cg = 10; cb = 180 - 60 * s;
+            cr = 100 + 60 * s; cg = 10; cb = 160 + 20 * s;
         } else if (heat < 0.5f) {
             float s = (heat - 0.33f) / 0.17f;
-            cr = 200 + 55 * s; cg = 10 + 10 * s; cb = 120 - 120 * s;
+            cr = 160 + 60 * s; cg = 10 + 20 * s; cb = 180 - 40 * s;
         } else if (heat < 0.66f) {
             float s = (heat - 0.5f) / 0.16f;
-            cr = 255; cg = 20 + 150 * s; cb = 0;
+            cr = 220 + 35 * s; cg = 30 + 100 * s; cb = 140 - 140 * s;
         } else if (heat < 0.83f) {
             float s = (heat - 0.66f) / 0.17f;
-            cr = 255; cg = 170 + 85 * s; cb = 50 * s;
+            cr = 255; cg = 130 + 95 * s; cb = 0;
         } else {
             float s = (heat - 0.83f) / 0.17f;
-            cr = 255; cg = 255; cb = 50 + 205 * s;
+            cr = 255; cg = 225 + 30 * s; cb = 200 * s;
         }
     } else if (mode == VIEW_REZ) {
         // Rez: indigo → teal-purple → cyan-red → orange → amber → white
@@ -335,7 +335,7 @@ void vehicle_update(vehicle_t *v, const hil_state_t *state, const home_position_
     // NED frame → Raylib (X=right, Y=up, Z=back)
     v->position.x = (float)jmav_y;
     v->position.y = (float)jmav_z;
-    if (v->position.y < 0.0f) v->position.y = 0.0f;
+    if (!v->is_underwater && v->position.y < 0.0f) v->position.y = 0.0f;
     v->position.z = (float)(-jmav_x);
 
     // MAVLink quaternion: w,x,y,z in NED frame → Raylib
@@ -752,11 +752,14 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
       }
     }
 
-    // Ground projection (shadow / ring) at Y=0
-    if (show_ground_track && v->position.y > 0.1f) {
+    // Ground/surface projection at Y=0
+    float abs_y = fabsf(v->position.y);
+    bool below_ground = v->position.y < -0.1f;
+    if (show_ground_track && (v->position.y > 0.1f || below_ground)) {
 
-        Vector3 ground = { v->position.x, 0.02f, v->position.z };
-        float radius = 1.0f + v->position.y * 0.1f;
+        float ground_y = below_ground ? -0.02f : 0.02f;
+        Vector3 ground = { v->position.x, ground_y, v->position.z };
+        float radius = 1.0f + abs_y * 0.1f;
         if (radius > 5.0f) radius = 5.0f;
 
         // Dotted vertical drop line
@@ -765,7 +768,11 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
         Color drop;
 
         Color fill_col, edge_col;
-        if (view_mode == VIEW_GRID) {
+        if (is_underwater && view_mode == VIEW_GRID) {
+            fill_col = (Color){ 255, 255, 255, 60 };
+            edge_col = (Color){ 255, 255, 255, 180 };
+            drop = (Color){ 255, 255, 255, 120 };
+        } else if (view_mode == VIEW_GRID) {
             fill_col = (Color){ 0, 0, 0, 100 };
             edge_col = (Color){ 80, 80, 80, 180 };
             drop = (Color){ 150, 150, 150, 120 };
@@ -789,7 +796,7 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
                 DrawCircle3D(ground, r, (Vector3){1, 0, 0}, 90.0f, fill_col);
             }
         } else {
-            Vector3 cyl_pos = { ground.x, 0.01f, ground.z };
+            Vector3 cyl_pos = { ground.x, below_ground ? -0.01f : 0.01f, ground.z };
             DrawCylinder(cyl_pos, radius, radius, 0.25f, 36, fill_col);
         }
         DrawCircle3D(ground, radius, (Vector3){1, 0, 0}, 90.0f, edge_col);
@@ -801,16 +808,29 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
         DrawLine3D((Vector3){ ground.x, ground.y, ground.z - cs },
                    (Vector3){ ground.x, ground.y, ground.z + cs }, edge_col);
 
-        float y_top = v->position.y;
-        float y_bot = 0.02f;
-        float y = y_top;
         rlSetLineWidth(2.5f);
-        while (y > y_bot) {
-            float y_end = y - dash;
-            if (y_end < y_bot) y_end = y_bot;
-            DrawLine3D((Vector3){ v->position.x, y, v->position.z },
-                       (Vector3){ v->position.x, y_end, v->position.z }, drop);
-            y -= dash + gap;
+        if (below_ground) {
+            // Dashed line going UP from vehicle to surface
+            float y = v->position.y;
+            float y_top = -0.02f;
+            while (y < y_top) {
+                float y_end = y + dash;
+                if (y_end > y_top) y_end = y_top;
+                DrawLine3D((Vector3){ v->position.x, y, v->position.z },
+                           (Vector3){ v->position.x, y_end, v->position.z }, drop);
+                y += dash + gap;
+            }
+        } else {
+            // Normal: dashed line going DOWN from vehicle to ground
+            float y = v->position.y;
+            float y_bot = 0.02f;
+            while (y > y_bot) {
+                float y_end = y - dash;
+                if (y_end < y_bot) y_end = y_bot;
+                DrawLine3D((Vector3){ v->position.x, y, v->position.z },
+                           (Vector3){ v->position.x, y_end, v->position.z }, drop);
+                y -= dash + gap;
+            }
         }
     }
 

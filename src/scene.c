@@ -46,85 +46,74 @@
 #define SYNTH_AXIS_Z   (Color){ 255, 20, 100, 220 }   // hot pink, full
 
 // Underwater mode colors (per view mode)
-// Grid underwater — mid-depth open water
-#define UW_GRID_SKY     (Color){  8,  24,  40, 255 }
-#define UW_GRID_GROUND  (Color){ 10,  30,  45, 255 }
-#define UW_GRID_CAUSTIC (Color){ 96, 216, 192, 128 }  // repurposed as colMinor
-#define UW_GRID_FOG     (Color){ 14,  48,  64, 255 }
+// Ground/sky/fog: 80% normal ground + 20% underwater accent
+// Caustic: kept vibrant (used for grid lines too)
+// Grid underwater
+#define UW_GRID_SKY     (Color){ 27,  30,  35, 255 }
+#define UW_GRID_GROUND  (Color){ 28,  32,  36, 255 }
+#define UW_GRID_CAUSTIC (Color){ 96, 216, 192, 128 }
+#define UW_GRID_FOG     (Color){ 28,  35,  40, 255 }
 
-// Rez underwater — bioluminescent abyss
-#define UW_REZ_SKY      (Color){  2,   4,   6, 255 }
-#define UW_REZ_GROUND   (Color){  3,   5,   8, 255 }
-#define UW_REZ_CAUSTIC  (Color){ 48, 232, 176,  40 }
-#define UW_REZ_FOG      (Color){  2,   4,   8, 255 }
+// Rez underwater — dark green-teal, brighter peak from shader
+#define UW_REZ_SKY      (Color){  6,   8,  14, 255 }
+#define UW_REZ_GROUND   (Color){  5,   7,  12, 255 }
+#define UW_REZ_CAUSTIC  (Color){  0, 140, 120,  60 }
+#define UW_REZ_FOG      (Color){  4,   6,  10, 255 }
 
-// Snow underwater — tropical shallows
-#define UW_SNOW_SKY     (Color){ 88, 208, 224, 255 }
-#define UW_SNOW_GROUND  (Color){ 60, 160, 180, 255 }
-#define UW_SNOW_CAUSTIC (Color){160, 232, 224, 200 }
-#define UW_SNOW_FOG     (Color){ 40, 140, 160, 255 }
+// Snow underwater — lighter, close to normal snow
+#define UW_SNOW_SKY     (Color){218, 232, 236, 255 }
+#define UW_SNOW_GROUND  (Color){212, 224, 228, 255 }
+#define UW_SNOW_CAUSTIC (Color){155, 160, 168, 200 }
+#define UW_SNOW_FOG     (Color){206, 218, 224, 255 }
 
-// 1988 underwater — neon reef
-#define UW_SYNTH_SKY    (Color){  6,   3,  16, 255 }
-#define UW_SYNTH_GROUND (Color){  8,   4,  20, 255 }
-#define UW_SYNTH_CAUSTIC (Color){255, 32, 128,  80 }
-#define UW_SYNTH_FOG    (Color){  6,   4,  16, 255 }
+// 1988 underwater — purple base, pink grid lines
+#define UW_SYNTH_SKY    (Color){ 10,   8,  24, 255 }
+#define UW_SYNTH_GROUND (Color){ 20,   8,  40, 255 }
+#define UW_SYNTH_CAUSTIC (Color){255,  20, 100,  80 }
+#define UW_SYNTH_FOG    (Color){ 15,   7,  30, 255 }
 
-// Edge ring system
-#define EDGE_RING_MAX 12
+// Bubble system — two columns on left/right edges
+// All positions stored as normalized (0-1) fractions for responsive scaling
+#define BUBBLE_MAX 20
 
 typedef struct {
-    float x, y;           // screen position
-    float radius;         // 20-80px
-    float dx, dy;         // drift velocity
-    float life;           // current time
+    float nx_base;        // normalized X center (0-1)
+    float ny;             // normalized Y position (0=top, 1=bottom)
+    float n_radius;       // normalized radius (fraction of screen height)
+    float n_rise_speed;   // normalized rise speed (fraction of screen height / sec)
+    float n_osc_amp;      // normalized oscillation amplitude (fraction of screen width)
+    float osc_period;     // oscillation period (seconds)
+    float osc_phase;      // random phase offset
+    float life;           // time alive
     float life_max;       // total lifetime
-    float thickness;      // 1.0-2.0px
+    float n_thickness;    // normalized ring thickness
     bool active;
-} edge_ring_t;
+} bubble_t;
 
-static edge_ring_t s_edge_rings[EDGE_RING_MAX];
-static bool s_edge_rings_inited = false;
+static bubble_t s_bubbles[BUBBLE_MAX];
+static bool s_bubbles_inited = false;
 
 static float randf(void) {
     return (float)(rand() % 10000) / 10000.0f;
 }
 
-static void edge_ring_spawn(edge_ring_t *r, int screen_w, int screen_h) {
-    r->radius = 20.0f + randf() * 60.0f;
-    r->life = 0.0f;
-    r->life_max = 4.0f + randf() * 4.0f;
-    r->thickness = 1.0f + randf() * 1.0f;
-    r->active = true;
+static void bubble_spawn(bubble_t *b) {
+    int side = rand() % 2;
+    // Column center: left 1/12 or right 11/12 of screen, with scatter
+    float col_center = side == 0 ? (1.0f / 12.0f) : (11.0f / 12.0f);
+    float scatter = (1.0f / 6.0f) * 0.3f;
+    b->nx_base = col_center + (randf() - 0.5f) * scatter;
 
-    // Pick random edge
-    int edge = rand() % 4;
-    switch (edge) {
-        case 0: // top
-            r->x = randf() * screen_w;
-            r->y = -r->radius * 0.5f;
-            r->dx = (randf() - 0.5f) * 8.0f;
-            r->dy = 5.0f + randf() * 10.0f;
-            break;
-        case 1: // bottom
-            r->x = randf() * screen_w;
-            r->y = screen_h + r->radius * 0.5f;
-            r->dx = (randf() - 0.5f) * 8.0f;
-            r->dy = -(5.0f + randf() * 10.0f);
-            break;
-        case 2: // left
-            r->x = -r->radius * 0.5f;
-            r->y = randf() * screen_h;
-            r->dx = 5.0f + randf() * 10.0f;
-            r->dy = (randf() - 0.5f) * 8.0f;
-            break;
-        case 3: // right
-            r->x = screen_w + r->radius * 0.5f;
-            r->y = randf() * screen_h;
-            r->dx = -(5.0f + randf() * 10.0f);
-            r->dy = (randf() - 0.5f) * 8.0f;
-            break;
-    }
+    b->ny = 1.05f; // start just below bottom
+    b->n_radius = 0.004f + randf() * 0.012f;
+    b->n_rise_speed = 0.04f + randf() * 0.05f;
+    b->n_osc_amp = 0.01f + randf() * 0.03f;
+    b->osc_period = 3.0f + randf() * 5.0f;
+    b->osc_phase = randf() * 6.28f;
+    b->life = 0.0f;
+    b->life_max = 1.1f / b->n_rise_speed;
+    b->n_thickness = 0.001f + randf() * 0.0005f;
+    b->active = randf() > 0.5f; // 50% chance of being inactive
 }
 
 // 1988 mountain settings
@@ -688,7 +677,10 @@ void scene_handle_input(scene_t *s) {
 
     if (IsKeyPressed(KEY_F)) {
         s->ground_tex_on = !s->ground_tex_on;
-        printf("Terrain: %s\n", s->ground_tex_on ? "ON" : "OFF");
+        if (s->is_underwater)
+            printf("Caustics: %s\n", s->ground_tex_on ? "ON" : "OFF");
+        else
+            printf("Terrain: %s\n", s->ground_tex_on ? "ON" : "OFF");
     }
 
     if (IsKeyPressed(KEY_U)) {
@@ -850,6 +842,7 @@ void scene_draw(const scene_t *s) {
             DrawModel(s->mountains, (Vector3){0, 0, 0}, 1.0f, WHITE);
             rlEnableBackfaceCulling();
         }
+
     } else if (s->view_mode == VIEW_GRID) {
         draw_shader_grid(s, GRID_GROUND, GRID_MINOR, GRID_MAJOR, GRID_AXIS_X, GRID_AXIS_Z,
             (Color){ 30, 34, 28, 255 }, (Color){ 42, 38, 32, 255 });
@@ -958,12 +951,23 @@ void scene_draw_ortho_ground(const scene_t *s, int screen_w, int screen_h) {
 
 void scene_draw_sky(const scene_t *s) {
     if (s->is_underwater) {
-        switch (s->view_mode) {
-            case VIEW_GRID: ClearBackground(UW_GRID_SKY); break;
-            case VIEW_REZ:  ClearBackground(UW_REZ_SKY); break;
-            case VIEW_SNOW: ClearBackground(UW_SNOW_SKY); break;
-            case VIEW_1988: ClearBackground(UW_SYNTH_SKY); break;
-            default:        ClearBackground(UW_GRID_SKY); break;
+        // Below surface: underwater color. Above surface: normal sky color.
+        if (s->camera.position.y < 0.0f) {
+            switch (s->view_mode) {
+                case VIEW_GRID: ClearBackground(UW_GRID_SKY); break;
+                case VIEW_REZ:  ClearBackground(UW_REZ_SKY); break;
+                case VIEW_SNOW: ClearBackground(UW_SNOW_SKY); break;
+                case VIEW_1988: ClearBackground(UW_SYNTH_SKY); break;
+                default:        ClearBackground(UW_GRID_SKY); break;
+            }
+        } else {
+            switch (s->view_mode) {
+                case VIEW_GRID: ClearBackground(GRID_SKY); break;
+                case VIEW_REZ:  ClearBackground(REZ_SKY); break;
+                case VIEW_SNOW: ClearBackground(SNOW_SKY); break;
+                case VIEW_1988: ClearBackground(SYNTH_SKY); break;
+                default:        ClearBackground(GRID_SKY); break;
+            }
         }
     } else {
         switch (s->view_mode) {
@@ -977,19 +981,21 @@ void scene_draw_sky(const scene_t *s) {
 }
 
 void scene_draw_underwater_overlay(scene_t *s, int screen_w, int screen_h) {
-    if (!s->is_underwater) return;
+    if (!s->is_underwater || s->camera.position.y >= 0.0f) return;
 
     float dt = GetFrameTime();
+    float sw = (float)screen_w;
+    float sh = (float)screen_h;
 
-    // Initialize edge rings on first call
-    if (!s_edge_rings_inited) {
-        for (int i = 0; i < EDGE_RING_MAX; i++) {
-            s_edge_rings[i].active = false;
-            // Stagger initial spawns
-            edge_ring_spawn(&s_edge_rings[i], screen_w, screen_h);
-            s_edge_rings[i].life = randf() * s_edge_rings[i].life_max;
+    // Initialize bubbles on first call
+    if (!s_bubbles_inited) {
+        for (int i = 0; i < BUBBLE_MAX; i++) {
+            bubble_spawn(&s_bubbles[i]);
+            // Stagger: start at random positions along their path
+            s_bubbles[i].life = randf() * s_bubbles[i].life_max;
+            s_bubbles[i].ny -= s_bubbles[i].n_rise_speed * s_bubbles[i].life;
         }
-        s_edge_rings_inited = true;
+        s_bubbles_inited = true;
     }
 
     // Pick accent color based on view mode
@@ -1001,29 +1007,40 @@ void scene_draw_underwater_overlay(scene_t *s, int screen_w, int screen_h) {
         default:        accent = (Color){ 64, 184, 208, 255 }; break;
     }
 
-    for (int i = 0; i < EDGE_RING_MAX; i++) {
-        edge_ring_t *r = &s_edge_rings[i];
+    for (int i = 0; i < BUBBLE_MAX; i++) {
+        bubble_t *b = &s_bubbles[i];
 
-        r->life += dt;
-        if (r->life >= r->life_max) {
-            edge_ring_spawn(r, screen_w, screen_h);
+        b->life += dt;
+        if (b->life >= b->life_max) {
+            bubble_spawn(b);
+            if (!b->active) continue; // intermittent: skip this cycle
             continue;
         }
+        if (!b->active) continue;
 
-        r->x += r->dx * dt;
-        r->y += r->dy * dt;
+        // Rise upward (normalized)
+        b->ny -= b->n_rise_speed * dt;
 
-        // Alpha: fade in 15%, hold, fade out 20%
-        float t = r->life / r->life_max;
+        // Horizontal oscillation in normalized space
+        float osc_x = sinf(b->life * (6.28f / b->osc_period) + b->osc_phase) * b->n_osc_amp;
+
+        // Convert to screen coords at draw time
+        float draw_x = (b->nx_base + osc_x) * sw;
+        float draw_y = b->ny * sh;
+        float radius = b->n_radius * sh;
+        float thickness = b->n_thickness * sh;
+
+        // Alpha: fade in, hold, fade out at top
+        float t = b->life / b->life_max;
         float alpha;
-        if (t < 0.15f) alpha = t / 0.15f;
-        else if (t > 0.8f) alpha = (1.0f - t) / 0.2f;
+        if (t < 0.1f) alpha = t / 0.1f;
+        else if (t > 0.85f) alpha = (1.0f - t) / 0.15f;
         else alpha = 1.0f;
-        alpha *= 0.1f;  // max opacity ~10%
+        alpha *= 0.15f;  // max opacity ~15%
 
         Color ring_color = (Color){ accent.r, accent.g, accent.b, (unsigned char)(alpha * 255) };
-        DrawRing((Vector2){r->x, r->y}, r->radius - r->thickness * 0.5f,
-                 r->radius + r->thickness * 0.5f, 0, 360, 36, ring_color);
+        DrawRing((Vector2){draw_x, draw_y}, radius - thickness * 0.5f,
+                 radius + thickness * 0.5f, 0, 360, 36, ring_color);
     }
 }
 

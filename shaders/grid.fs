@@ -42,18 +42,40 @@ void main() {
     float dist = length(coord);
 
     if (isUnderwater != 0) {
-        // ── Underwater: caustic pattern replaces grid ──
+        // ── Underwater: caustic pattern + grid lines ──
         float c = caustic(coord * 0.01, uTime);
 
-        // Caustic color from colMinor (repurposed as caustic tint)
-        vec3 causticCol = colMinor.rgb * c * 0.35;
-        vec4 color = vec4(colGround.rgb + causticCol, 1.0);
+        // Pool-style caustics: bright web lines around small darker cells
+        // Invert pattern so lines (edges) are bright, cell interiors are dark
+        float web = 1.0 - c;
+        float bright = smoothstep(0.997, 0.9999, web);
+        // White-hot core at the very peak
+        float white = smoothstep(0.999993, 0.999999, web);
 
-        // Shorter fog distance underwater (use colFog for fog range hints)
-        // fogStart and fogEnd encoded: fogStart=60, fogEnd=200 for default
-        float fogStart = 60.0;
-        float fogEnd = 200.0;
-        float fade = 1.0 - smoothstep(fogStart, fogEnd, dist);
+        float causticOn = float(1 - texEnabled);
+        vec3 base = colGround.rgb;
+        vec3 highlight = mix(colMinor.rgb * 0.5, colMinor.rgb * 1.5, white) * bright * causticOn;
+        vec4 color = vec4(base + highlight, 1.0);
+
+        // Grid lines on top of caustics
+        vec2 grid = abs(fract(coord / spacing - 0.5) - 0.5) / fwidth(coord / spacing);
+        float lineMinor = 1.0 - clamp(min(grid.x, grid.y), 0.0, 1.0);
+
+        float majorSpacing = spacing * majorEvery;
+        vec2 gridMajor = abs(fract(coord / majorSpacing - 0.5) - 0.5) / fwidth(coord / majorSpacing);
+        float lineMajor = 1.0 - clamp(min(gridMajor.x, gridMajor.y), 0.0, 1.0);
+
+        vec2 axisGrid = abs(coord) / fwidth(coord);
+        float axisXLine = 1.0 - clamp(axisGrid.y / axisWidth, 0.0, 1.0);
+        float axisZLine = 1.0 - clamp(axisGrid.x / axisWidth, 0.0, 1.0);
+
+        color = mix(color, vec4(colMinor.rgb * 0.3, 1.0), lineMinor * 0.4);
+        color = mix(color, vec4(colMinor.rgb * 0.5, 1.0), lineMajor * 0.6);
+        color = mix(color, colAxisX, axisXLine * colAxisX.a * 0.5);
+        color = mix(color, colAxisZ, axisZLine * colAxisZ.a * 0.5);
+
+        // Same fog distance as normal mode
+        float fade = 1.0 - smoothstep(400.0, 800.0, dist);
         color.rgb = mix(colFog.rgb, color.rgb, fade);
 
         color.a = 1.0;

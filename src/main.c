@@ -353,6 +353,10 @@ int main(int argc, char *argv[]) {
 
     // Main loop
     while (!WindowShouldClose()) {
+        // Sync underwater flag to vehicles (controls Y clamp in vehicle_update)
+        for (int i = 0; i < vehicle_count; i++)
+            vehicles[i].is_underwater = scene.is_underwater;
+
         // Missile mode controls
         if (missile_mode) {
             if (IsKeyPressed(KEY_SPACE)) missile_paused = !missile_paused;
@@ -724,6 +728,7 @@ int main(int argc, char *argv[]) {
 
         // Update debug panel
         debug_panel_update(&dbg_panel, GetFrameTime());
+
 
         // Update camera to follow selected vehicle
         scene_update_camera(&scene, vehicles[selected].position, vehicles[selected].rotation);

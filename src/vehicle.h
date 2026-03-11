@@ -48,6 +48,7 @@ typedef struct {
     bool origin_set;
     int origin_wait_count;   // HIL updates received while waiting for HOME_POSITION
     bool active;             // has received data
+    bool is_underwater;      // skip Y clamp when underwater
     double lat0;             // radians
     double lon0;             // radians
     double alt0;             // meters
