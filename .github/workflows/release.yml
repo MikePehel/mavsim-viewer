@@ -124,7 +124,8 @@ jobs:
           BOTTLE_SHA=$(python3 -c "
           import json, sys
           data = json.load(open(sys.argv[1]))
-          tags = data['mavsim-viewer']['bottle']['tags']
+          formula = list(data.keys())[0]
+          tags = data[formula]['bottle']['tags']
           tag = list(tags.keys())[0]
           print(tags[tag]['sha256'])
           " "$BOTTLE_JSON")
@@ -132,7 +133,8 @@ jobs:
           BOTTLE_TAG=$(python3 -c "
           import json, sys
           data = json.load(open(sys.argv[1]))
-          tags = data['mavsim-viewer']['bottle']['tags']
+          formula = list(data.keys())[0]
+          tags = data[formula]['bottle']['tags']
           print(list(tags.keys())[0])
           " "$BOTTLE_JSON")
 
