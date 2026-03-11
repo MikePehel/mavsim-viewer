@@ -17,8 +17,9 @@
 #include "ortho_panel.h"
 #include "asset_path.h"
 
-#define MAX_VEHICLES 17
+#define MAX_VEHICLES 65
 #define MISSILE_COUNT 16
+#define BENCH_COUNT  64
 
 static const Color vehicle_colors[MAX_VEHICLES] = {
     {230, 230, 230, 255}, // 0: white (default single)
@@ -38,6 +39,22 @@ static const Color vehicle_colors[MAX_VEHICLES] = {
     {170, 255, 128, 255}, // 14: lime
     {200, 200, 200, 255}, // 15: silver
     {255,  50,  50, 255}, // 16: target (red)
+    {180, 255, 200, 255}, // 17: mint
+    {255, 220, 100, 255}, // 18: gold
+    {100, 149, 237, 255}, // 19: cornflower
+    {220, 100, 100, 255}, // 20: salmon
+    { 60, 200, 120, 255}, // 21: emerald
+    {200, 160, 255, 255}, // 22: lavender
+    {255, 140, 100, 255}, // 23: coral
+    { 80, 220, 220, 255}, // 24: aqua
+    {240, 200, 180, 255}, // 25: sand
+    {140, 180, 255, 255}, // 26: periwinkle
+    {255, 180, 220, 255}, // 27: rose
+    {160, 220,  80, 255}, // 28: chartreuse
+    {220, 180, 140, 255}, // 29: tan
+    {100, 200, 255, 255}, // 30: light blue
+    {255, 160, 160, 255}, // 31: light red
+    {180, 220, 180, 255}, // 32: sage
 };
 
 // ── Anime missile barrage simulation ────────────────────────────────────────
@@ -188,6 +205,97 @@ static void missile_barrage_state(const missile_params_t *p, float t,
     out_state->time_usec = (uint64_t)(t * 1e6);
 }
 
+// ── Benchmark: drones in offset vertical figure-eights at max airspeed ──
+#define BENCH_SPEED     30.0f   // m/s (~108 km/h, typical max airspeed)
+#define BENCH_RADIUS    25.0f   // radius of each lobe of the figure-eight
+
+typedef struct {
+    float phase;        // phase offset so drones don't overlap
+    float center_x;     // center of figure-eight in world X
+    float center_z;     // center of figure-eight in world Z
+} bench_params_t;
+
+static void bench_init(bench_params_t *params, int count) {
+    // Arrange in a square grid: 3x3 for 9, 4x4 for 16
+    int cols = (int)ceilf(sqrtf((float)count));
+    float grid_spacing = BENCH_RADIUS * 2.5f;
+    float offset = (cols - 1) * 0.5f;
+    for (int i = 0; i < count; i++) {
+        int row = i / cols;
+        int col = i % cols;
+        params[i].center_x = (col - offset) * grid_spacing;
+        params[i].center_z = (row - offset) * grid_spacing;
+        // Offset phase so adjacent drones are never at the same point
+        params[i].phase = (float)i * (2.0f * (float)M_PI / count);
+    }
+}
+
+static void bench_state(const bench_params_t *p, float t,
+                         hil_state_t *out_state)
+{
+    // Vertical figure-eight using lemniscate of Bernoulli parametric form:
+    //   x(t) = R * sin(a)
+    //   y(t) = R * sin(a) * cos(a)  (= R/2 * sin(2a))
+    // where a = angular parameter advancing at constant speed
+    float period = (2.0f * (float)M_PI * BENCH_RADIUS * 2.0f) / BENCH_SPEED;
+    float a = (t / period) * 2.0f * (float)M_PI + p->phase;
+
+    // Horizontal position: figure-eight in XZ plane offset by center
+    float local_x = BENCH_RADIUS * sinf(a);
+    float local_z = BENCH_RADIUS * sinf(a) * cosf(a);
+
+    // Vertical: oscillate between 10m and 10+2*R meters
+    float local_y = 10.0f + BENCH_RADIUS + BENCH_RADIUS * cosf(a);
+
+    float pos_x = p->center_x + local_x;
+    float pos_z = p->center_z + local_z;
+    float pos_y = local_y;
+
+    // Velocity (analytical derivative)
+    float da_dt = (2.0f * (float)M_PI) / period;
+    float vx = BENCH_RADIUS * cosf(a) * da_dt;
+    float vz = BENCH_RADIUS * (cosf(a) * cosf(a) - sinf(a) * sinf(a)) * da_dt;
+    float vy = -BENCH_RADIUS * sinf(a) * da_dt;
+
+    // Speed for airspeed reporting
+    float spd = sqrtf(vx*vx + vy*vy + vz*vz);
+
+    // Convert to lat/lon/alt
+    double base_lat = 47.397742;
+    double base_lon = 8.545594;
+    double base_alt = 489.4;
+    double meters_per_deg_lat = 111132.0;
+    double meters_per_deg_lon = 111132.0 * cos(base_lat * M_PI / 180.0);
+
+    out_state->lat = (int32_t)((base_lat + (double)pos_z / meters_per_deg_lat) * 1e7);
+    out_state->lon = (int32_t)((base_lon + (double)pos_x / meters_per_deg_lon) * 1e7);
+    out_state->alt = (int32_t)((base_alt + (double)pos_y) * 1000.0);
+
+    // NED velocity
+    out_state->vx = (int16_t)(vz * 100.0f);   // NED north
+    out_state->vy = (int16_t)(vx * 100.0f);   // NED east
+    out_state->vz = (int16_t)(-vy * 100.0f);  // NED down
+    out_state->ind_airspeed = (uint16_t)(spd * 100.0f);
+    out_state->true_airspeed = out_state->ind_airspeed;
+
+    // Orientation: nose along velocity vector
+    float yaw = atan2f(vx, vz);
+    float pitch = -asinf(vy / (spd > 0.1f ? spd : 0.1f));
+    float roll = atan2f(vx * da_dt, 9.81f) * 0.3f; // gentle banking
+
+    // Euler to quaternion (ZYX order for NED)
+    float cy = cosf(yaw * 0.5f), sy = sinf(yaw * 0.5f);
+    float cp = cosf(pitch * 0.5f), sp = sinf(pitch * 0.5f);
+    float cr = cosf(roll * 0.5f), sr = sinf(roll * 0.5f);
+    out_state->quaternion[0] = cr*cp*cy + sr*sp*sy;
+    out_state->quaternion[1] = sr*cp*cy - cr*sp*sy;
+    out_state->quaternion[2] = cr*cp*sy + sr*sp*cy;
+    out_state->quaternion[3] = cr*sp*cy - sr*cp*sy;
+
+    out_state->valid = true;
+    out_state->time_usec = (uint64_t)(t * 1e6);
+}
+
 static void print_usage(const char *prog) {
     printf("Usage: %s [options]\n", prog);
     printf("  -udp <port>    UDP base port (default: 19410)\n");
@@ -215,6 +323,8 @@ int main(int argc, char *argv[]) {
     bool origin_specified = false;
     const char *replay_file = NULL;
     bool missile_mode = false;
+    bool bench_mode = false;
+    int bench_count = 0;
     bool fake_mode = false;
 
     for (int i = 1; i < argc; i++) {
@@ -245,6 +355,15 @@ int main(int argc, char *argv[]) {
             replay_file = argv[++i];
         } else if (strcmp(argv[i], "-missile") == 0) {
             missile_mode = true;
+        } else if (strcmp(argv[i], "-bench") == 0) {
+            bench_mode = true;
+            bench_count = BENCH_COUNT;
+        } else if (strcmp(argv[i], "-bench9") == 0) {
+            bench_mode = true;
+            bench_count = 9;
+        } else if (strcmp(argv[i], "-bench32") == 0) {
+            bench_mode = true;
+            bench_count = 32;
         } else if (strcmp(argv[i], "-fake") == 0) {
             fake_mode = true;
         } else if (strcmp(argv[i], "--help") == 0) {
@@ -274,6 +393,15 @@ int main(int argc, char *argv[]) {
         origin_specified = true; // force shared origin
     }
 
+    // Benchmark mode: drones in figure-eights
+    bench_params_t bench_params[BENCH_COUNT];
+    float bench_time = 0.0f;
+    if (bench_mode) {
+        vehicle_count = bench_count;
+        bench_init(bench_params, bench_count);
+        origin_specified = true;
+    }
+
     if (fake_mode) {
         vehicle_count = 1;
         origin_specified = true;
@@ -286,7 +414,7 @@ int main(int argc, char *argv[]) {
             CloseWindow();
             return 1;
         }
-    } else if (!missile_mode && !fake_mode) {
+    } else if (!missile_mode && !bench_mode && !fake_mode) {
         for (int i = 0; i < vehicle_count; i++) {
             if (data_source_mavlink_create(&sources[i], base_port + i, (uint8_t)i, debug) != 0) {
                 fprintf(stderr, "Failed to init MAVLink receiver on port %u\n", base_port + i);
@@ -310,6 +438,11 @@ int main(int argc, char *argv[]) {
         }
         vehicle_init(&vehicles[MISSILE_COUNT], MODEL_VTOL, scene.lighting_shader);
         vehicles[MISSILE_COUNT].color = vehicle_colors[MISSILE_COUNT];
+    } else if (bench_mode) {
+        for (int i = 0; i < bench_count; i++) {
+            vehicle_init(&vehicles[i], MODEL_QUADROTOR, scene.lighting_shader);
+            vehicles[i].color = vehicle_colors[i % 16];
+        }
     } else {
         for (int i = 0; i < vehicle_count; i++) {
             vehicle_init(&vehicles[i], model_idx, scene.lighting_shader);
@@ -426,6 +559,17 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        // Benchmark mode: drones in vertical figure-eights
+        if (bench_mode) {
+            bench_time += GetFrameTime();
+            for (int i = 0; i < bench_count; i++) {
+                hil_state_t state = {0};
+                bench_state(&bench_params[i], bench_time, &state);
+                vehicle_update(&vehicles[i], &state, NULL);
+                vehicles[i].active = true;
+            }
+        }
+
         // Fake mode: WASDQE flight control
         if (fake_mode) {
             static float fake_x = 0.0f, fake_y = 10.0f, fake_z = 0.0f;
@@ -506,7 +650,7 @@ int main(int argc, char *argv[]) {
         }
 
         // Poll all data sources and update vehicles
-        for (int i = 0; i < vehicle_count && !missile_mode && !fake_mode; i++) {
+        for (int i = 0; i < vehicle_count && !missile_mode && !bench_mode && !fake_mode; i++) {
             data_source_poll(&sources[i], GetFrameTime());
 
             // Reset trail and origin on reconnect
@@ -535,7 +679,7 @@ int main(int argc, char *argv[]) {
         }
 
         // Check if any source is connected (for HUD)
-        bool any_connected = fake_mode || missile_mode;
+        bool any_connected = fake_mode || missile_mode || bench_mode;
         for (int i = 0; i < vehicle_count && !any_connected; i++) {
             if (sources[i].connected) { any_connected = true; break; }
         }
@@ -799,7 +943,7 @@ int main(int argc, char *argv[]) {
     hud_cleanup(&hud);
     for (int i = 0; i < vehicle_count; i++) {
         vehicle_cleanup(&vehicles[i]);
-        data_source_close(&sources[i]);
+        if (sources[i].ops) data_source_close(&sources[i]);
     }
     scene_cleanup(&scene);
     CloseWindow();
