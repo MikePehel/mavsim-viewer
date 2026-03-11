@@ -1,0 +1,1280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MAVSim Underwater View Modes — MAV_TYPE_SUBMARINE</title>
+<style>
+  :root {
+    --bg: #060610;
+    --surface: #0c0c1a;
+    --surface2: #141428;
+    --border: #1e2040;
+    --text: #c8d0e0;
+    --text-dim: #606888;
+    --caustic: #60d8c0;
+    --biolum: #40ffb0;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+    line-height: 1.6;
+    padding: 40px 20px;
+  }
+
+  .container { max-width: 1200px; margin: 0 auto; }
+
+  h1 {
+    font-size: 2.4em;
+    font-weight: 700;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #1a6888, #40ffb0, #1a6888);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .subtitle { color: var(--text-dim); font-size: 1.1em; margin-bottom: 16px; max-width: 800px; }
+
+  .trigger-note {
+    background: var(--surface);
+    border-left: 3px solid var(--caustic);
+    border-radius: 0 8px 8px 0;
+    padding: 14px 20px;
+    margin: 20px 0 48px 0;
+    font-size: 0.9em;
+  }
+
+  .trigger-note code {
+    background: var(--surface2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9em;
+    color: var(--caustic);
+  }
+
+  h2 {
+    font-size: 1.8em;
+    font-weight: 700;
+    margin: 64px 0 8px 0;
+    padding-top: 32px;
+  }
+
+  h2 .mode-tag {
+    font-size: 0.5em;
+    font-weight: 400;
+    vertical-align: middle;
+    padding: 3px 10px;
+    border-radius: 4px;
+    margin-left: 12px;
+    letter-spacing: 0.05em;
+  }
+
+  h3 { font-size: 1.1em; font-weight: 600; margin: 28px 0 12px 0; color: var(--text); }
+  p { color: var(--text-dim); margin-bottom: 14px; max-width: 780px; }
+
+  hr.divider { border: none; border-top: 1px solid var(--border); margin: 48px 0; }
+
+  code {
+    background: var(--surface2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85em;
+    color: var(--caustic);
+  }
+
+  /* ── Cards & Grids ──────────────────────────────────────────── */
+  .concepts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin: 24px 0;
+  }
+
+  .concept-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+  }
+
+  .concept-card h4 { font-size: 0.95em; font-weight: 600; margin-bottom: 8px; }
+  .concept-card p { font-size: 0.85em; margin-bottom: 0; }
+
+  .concept-card .detail {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78em;
+    color: var(--caustic);
+    margin-top: 8px;
+  }
+
+  .side-by-side {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 20px 0;
+  }
+
+  .side-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+  }
+
+  .side-card h4 { font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; }
+  .side-card ul { list-style: none; padding: 0; }
+  .side-card li { color: var(--text-dim); font-size: 0.85em; padding: 3px 0 3px 14px; position: relative; }
+  .side-card li::before { content: '›'; position: absolute; left: 0; font-weight: bold; }
+
+  /* ── Viewports ──────────────────────────────────────────────── */
+  .viewport {
+    border-radius: 16px;
+    overflow: hidden;
+    margin: 24px 0;
+    border: 1px solid var(--border);
+    position: relative;
+  }
+
+  .viewport svg { width: 100%; height: auto; display: block; }
+
+  .viewport-label {
+    position: absolute;
+    top: 12px;
+    left: 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7em;
+    padding: 3px 8px;
+    border-radius: 4px;
+    z-index: 2;
+  }
+
+  /* ── Swatches ───────────────────────────────────────────────── */
+  .palette { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+
+  .swatch {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 12px 6px 6px;
+  }
+
+  .swatch-color {
+    width: 28px; height: 28px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.1);
+    flex-shrink: 0;
+  }
+
+  .swatch-info { font-size: 0.75em; line-height: 1.3; }
+  .swatch-name { color: var(--text); font-weight: 500; }
+  .swatch-rgb { color: var(--text-dim); font-family: 'JetBrains Mono', monospace; font-size: 0.9em; }
+
+  /* ── Tables ─────────────────────────────────────────────────── */
+  .compare-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 20px 0;
+    font-size: 0.85em;
+  }
+
+  .compare-table th {
+    background: var(--surface);
+    color: var(--text);
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+    font-size: 0.9em;
+  }
+
+  .compare-table td {
+    padding: 8px 14px;
+    border-bottom: 1px solid #12122a;
+    color: var(--text-dim);
+    vertical-align: top;
+  }
+
+  .compare-table .label-col { color: var(--text); font-weight: 500; white-space: nowrap; }
+
+  .compare-table .color-dot {
+    display: inline-block;
+    width: 12px; height: 12px;
+    border-radius: 3px;
+    vertical-align: middle;
+    margin-right: 6px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  /* ── HUD strips ─────────────────────────────────────────────── */
+  .hud-strip {
+    background: rgba(0,0,0,0.8);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 20px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8em;
+    display: flex;
+    gap: 32px;
+    margin: 16px 0;
+    flex-wrap: wrap;
+  }
+
+  .hud-item { display: flex; flex-direction: column; gap: 2px; }
+  .hud-label { font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.1em; }
+  .hud-value { font-size: 1.3em; font-weight: 600; }
+
+  /* ── Thermal strips ─────────────────────────────────────────── */
+  .thermal-strip { height: 12px; border-radius: 6px; margin: 8px 0; }
+  .thermal-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.7em;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  /* ── Impl notes ─────────────────────────────────────────────── */
+  .impl-note {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin: 16px 0;
+  }
+
+  .impl-note pre {
+    background: #080818;
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin: 12px 0;
+    overflow-x: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8em;
+    line-height: 1.5;
+    color: var(--text-dim);
+  }
+
+  .impl-note pre .kw { color: #c792ea; }
+  .impl-note pre .fn { color: #82aaff; }
+  .impl-note pre .num { color: #f78c6c; }
+  .impl-note pre .cm { color: #546e7a; }
+  .impl-note pre .type { color: #ffcb6b; }
+
+  /* ── Edge ring animation ────────────────────────────────────── */
+  @keyframes ring-drift-1 {
+    0% { transform: translate(0, 0); opacity: 0; }
+    10% { opacity: 0.12; }
+    80% { opacity: 0.08; }
+    100% { transform: translate(-60px, 30px); opacity: 0; }
+  }
+  @keyframes ring-drift-2 {
+    0% { transform: translate(0, 0); opacity: 0; }
+    15% { opacity: 0.1; }
+    75% { opacity: 0.06; }
+    100% { transform: translate(50px, -40px); opacity: 0; }
+  }
+  @keyframes ring-drift-3 {
+    0% { transform: translate(0, 0); opacity: 0; }
+    12% { opacity: 0.08; }
+    85% { opacity: 0.05; }
+    100% { transform: translate(-30px, -50px); opacity: 0; }
+  }
+  @keyframes ring-drift-4 {
+    0% { transform: translate(0, 0); opacity: 0; }
+    20% { opacity: 0.1; }
+    70% { opacity: 0.06; }
+    100% { transform: translate(40px, 20px); opacity: 0; }
+  }
+
+  .edge-ring {
+    position: absolute;
+    border-radius: 50%;
+    border: 1.5px solid;
+    pointer-events: none;
+  }
+
+  @media (max-width: 700px) {
+    .side-by-side { grid-template-columns: 1fr; }
+    .concepts-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<h1>Underwater View Modes</h1>
+<p class="subtitle">Toggle underwater mode with <code>U</code>. Each view mode gets a submerged variant. The water surface at Y=0 becomes a caustic-lit ceiling. The vehicle descends into negative Y space. No seafloor — just open water fading to fog.</p>
+
+<div class="trigger-note">
+  <strong>Toggle:</strong> <code>KEY_U</code> toggles <code>is_underwater</code> on the scene. Eventually this will auto-activate when <code>mav_type == 12</code> (MAV_TYPE_SUBMARINE) and we have a proper ROV model. Until then, manual toggle lets us develop and test the rendering with any vehicle. The V key still cycles view modes — each renders its underwater variant when the flag is set.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<h2>Spatial Model</h2>
+<p>The fundamental shift: the ground plane becomes the water surface, and the vehicle operates below it.</p>
+
+<div class="concepts-grid">
+  <div class="concept-card">
+    <h4 style="color: #40b8ff;">Y=0 is the Water Surface</h4>
+    <p>The existing ground plane mesh stays at Y=0 but renders as a <strong>semi-transparent water surface</strong> with animated caustic patterns instead of grid lines. Double-sided — visible from above and below. This is the vehicle's spatial reference: it looks up and sees the shimmering surface.</p>
+    <div class="detail">rlDisableBackfaceCulling() on surface mesh<br>Caustics replace grid lines in shader<br>Grid uniforms → caustic uniforms</div>
+  </div>
+  <div class="concept-card">
+    <h4 style="color: #60d8c0;">Negative Y = Depth</h4>
+    <p>Vehicle position is negative Y. Depth 22m = position Y=-22. This matches PX4's convention: altitude is relative to home (surface), going down is negative. The HUD shows depth as a positive number with a "DEPTH" label instead of "ALT".</p>
+    <div class="detail">depth_display = -vehicle.position.y<br>HUD label: "ALT" → "DEPTH"<br>Vert speed arrow meaning flipped</div>
+  </div>
+  <div class="concept-card">
+    <h4 style="color: #3080c0;">No Seafloor</h4>
+    <p>There is no ground plane below the vehicle. Looking down shows open water fading into fog. The fog IS the ocean — depth-based visibility limits create the sense of a water column without needing geometry. This is accurate to open-water diving.</p>
+    <div class="detail">Fog range: 60-200m (mode dependent)<br>Fog color: mode's water color<br>Below = void, above = caustic surface</div>
+  </div>
+  <div class="concept-card">
+    <h4 style="color: #2868a8;">Color Attenuation with Depth</h4>
+    <p>Water absorbs red light first, then green. Deeper = bluer. Trail colors and vehicle tint shift toward blue-green based on the vehicle's Y position. The HUD is exempt — instruments don't attenuate.</p>
+    <div class="detail">red *= exp(position.y * 0.08)<br>green *= exp(position.y * 0.02)<br>blue unaffected</div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<h2>Caustic Surface (Replaces Grid)</h2>
+<p>The grid shader renders procedural caustics instead of grid lines when <code>is_underwater</code> is set. The caustic pattern provides the same spatial grounding — you can perceive relative motion against it — but reads as light refracting through surface waves.</p>
+
+<div class="viewport">
+  <div class="viewport-label" style="background: rgba(10,30,50,0.85); color: #60d8c0;">Caustic Surface — Looking Up from -15m</div>
+  <svg viewBox="0 0 1000 400" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <linearGradient id="caustic-sky" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#1a7888"/>
+        <stop offset="100%" stop-color="#0e3848"/>
+      </linearGradient>
+      <!-- Organic caustic web pattern via overlapping shapes -->
+      <filter id="caustic-gen">
+        <feTurbulence type="turbulence" baseFrequency="0.008 0.012" numOctaves="3" seed="5" result="turb"/>
+        <feColorMatrix type="luminanceToAlpha" in="turb" result="alpha"/>
+        <feComponentTransfer in="alpha" result="sharp">
+          <feFuncA type="table" tableValues="0 0 0.3 0.8 0.3 0 0 0.2 0.7 0.2 0 0"/>
+        </feComponentTransfer>
+        <feFlood flood-color="#60d8c0" result="color"/>
+        <feComposite in="color" in2="sharp" operator="in"/>
+      </filter>
+    </defs>
+
+    <!-- Water column (looking up) -->
+    <rect width="1000" height="400" fill="url(#caustic-sky)"/>
+
+    <!-- Caustic pattern layer on surface (top portion of view = the surface above) -->
+    <rect x="0" y="0" width="1000" height="200" fill="url(#caustic-sky)" opacity="0.5"/>
+    <rect x="0" y="0" width="1000" height="200" filter="url(#caustic-gen)" opacity="0.6"/>
+
+    <!-- Bright surface shimmer line at top -->
+    <line x1="0" y1="8" x2="1000" y2="8" stroke="#80e8f0" stroke-width="1" opacity="0.3"/>
+
+    <!-- Hand-drawn caustic web lines (organic, not grid-like) -->
+    <!-- These simulate what the procedural shader produces -->
+    <g opacity="0.25" stroke="#60d8c0" fill="none" stroke-width="1.2">
+      <!-- Caustic cell 1 -->
+      <path d="M 80,30 Q 120,15 170,35 Q 200,50 180,80 Q 150,95 110,80 Q 75,60 80,30"/>
+      <!-- Caustic cell 2 -->
+      <path d="M 200,20 Q 260,10 310,30 Q 340,55 320,85 Q 280,100 230,85 Q 190,60 200,20"/>
+      <!-- Caustic cell 3 -->
+      <path d="M 350,15 Q 410,5 460,25 Q 490,50 475,80 Q 440,100 390,90 Q 340,65 350,15"/>
+      <!-- Caustic cell 4 -->
+      <path d="M 500,25 Q 550,10 600,30 Q 640,55 620,90 Q 580,110 530,95 Q 490,65 500,25"/>
+      <!-- Caustic cell 5 -->
+      <path d="M 650,20 Q 710,8 760,28 Q 795,50 780,85 Q 745,105 690,90 Q 645,60 650,20"/>
+      <!-- Caustic cell 6 -->
+      <path d="M 800,30 Q 850,15 900,35 Q 935,55 920,85 Q 880,105 830,90 Q 795,60 800,30"/>
+    </g>
+    <!-- Brighter interior highlights -->
+    <g opacity="0.15" stroke="#90f0e0" fill="none" stroke-width="0.6">
+      <path d="M 130,45 Q 155,35 175,50 Q 165,70 140,65 Q 120,55 130,45"/>
+      <path d="M 260,35 Q 290,25 310,45 Q 300,65 275,60 Q 250,50 260,35"/>
+      <path d="M 420,30 Q 450,20 470,40 Q 460,62 435,58 Q 410,45 420,30"/>
+      <path d="M 560,40 Q 585,28 605,48 Q 595,70 570,65 Q 550,52 560,40"/>
+      <path d="M 720,32 Q 748,22 768,42 Q 758,62 735,58 Q 712,48 720,32"/>
+      <path d="M 860,42 Q 885,30 905,50 Q 895,68 872,65 Q 850,55 860,42"/>
+    </g>
+
+    <!-- Caustic pattern fades with depth (lower = deeper = dimmer) -->
+    <rect x="0" y="120" width="1000" height="280" fill="url(#caustic-sky)" opacity="0.6"/>
+
+    <!-- Floating particles (marine snow) -->
+    <circle cx="150" cy="220" r="1.2" fill="#80b0c0" opacity="0.25"/>
+    <circle cx="400" cy="280" r="0.8" fill="#80b0c0" opacity="0.2"/>
+    <circle cx="650" cy="180" r="1.5" fill="#90c0d0" opacity="0.2"/>
+    <circle cx="820" cy="310" r="1" fill="#80b0c0" opacity="0.15"/>
+    <circle cx="300" cy="340" r="1.3" fill="#80b0c0" opacity="0.2"/>
+    <circle cx="550" cy="150" r="0.9" fill="#90c0d0" opacity="0.18"/>
+    <circle cx="900" cy="240" r="1.1" fill="#80b0c0" opacity="0.22"/>
+
+    <!-- Vehicle silhouette -->
+    <g transform="translate(500, 250)">
+      <rect x="-22" y="-9" width="44" height="18" rx="5" fill="#a0c0c8" stroke="#40b8d0" stroke-width="1" opacity="0.9"/>
+      <rect x="-30" y="-7" width="8" height="5" rx="2" fill="#708888" opacity="0.8"/>
+      <rect x="-30" y="2" width="8" height="5" rx="2" fill="#708888" opacity="0.8"/>
+      <rect x="22" y="-7" width="8" height="5" rx="2" fill="#708888" opacity="0.8"/>
+      <rect x="22" y="2" width="8" height="5" rx="2" fill="#708888" opacity="0.8"/>
+      <circle cx="15" cy="0" r="3" fill="#ffdd40" opacity="0.7"/>
+    </g>
+
+    <!-- Trail -->
+    <polyline points="500,250 450,253 390,247 330,255 270,244 210,251 160,243"
+      fill="none" stroke="#40c8a0" stroke-width="2" opacity="0.5"/>
+  </svg>
+</div>
+
+<div class="impl-note">
+  <p style="color: var(--text); margin-bottom: 12px;"><strong>Caustics replace the grid — same shader, different math:</strong></p>
+<pre>
+<span class="cm">// In grid.fs, when is_underwater:</span>
+<span class="cm">// Instead of fract()-based grid lines, compute caustic pattern</span>
+
+<span class="kw">float</span> <span class="fn">caustic</span>(<span class="kw">vec2</span> uv, <span class="kw">float</span> time) {
+    <span class="kw">vec2</span> uv1 = uv * <span class="num">8.0</span> + <span class="kw">vec2</span>(time * <span class="num">0.3</span>, time * <span class="num">0.2</span>);
+    <span class="kw">vec2</span> uv2 = uv * <span class="num">6.0</span> + <span class="kw">vec2</span>(-time * <span class="num">0.2</span>, time * <span class="num">0.35</span>);
+
+    <span class="kw">float</span> c1 = <span class="fn">sin</span>(uv1.x + <span class="fn">sin</span>(uv1.y * <span class="num">0.8</span>))
+             * <span class="fn">sin</span>(uv1.y + <span class="fn">sin</span>(uv1.x * <span class="num">0.6</span>));
+    <span class="kw">float</span> c2 = <span class="fn">sin</span>(uv2.x + <span class="fn">sin</span>(uv2.y * <span class="num">0.7</span>))
+             * <span class="fn">sin</span>(uv2.y + <span class="fn">sin</span>(uv2.x * <span class="num">0.9</span>));
+
+    <span class="kw">float</span> c = (c1 + c2) * <span class="num">0.5</span>;
+    <span class="kw">return</span> <span class="fn">clamp</span>(c * c, <span class="num">0.0</span>, <span class="num">1.0</span>);
+}
+
+<span class="cm">// In main():</span>
+<span class="kw">if</span> (is_underwater) {
+    <span class="kw">float</span> c = <span class="fn">caustic</span>(worldPos.xz * <span class="num">0.01</span>, time);
+    fragColor.rgb = groundFill + causticColor.rgb * c * <span class="num">0.3</span>;
+    <span class="cm">// No grid lines, no axis lines, no major/minor distinction</span>
+    <span class="cm">// Just the organic caustic web</span>
+} <span class="kw">else</span> {
+    <span class="cm">// existing grid line logic</span>
+}
+</pre>
+  <p style="color: var(--text-dim); font-size: 0.85em; margin-top: 8px;">New uniforms needed: <code>is_underwater</code> (bool/int), <code>time</code> (float). Caustic intensity fades with camera depth — bright at -2m, gone by -80m. Same shader file, same draw call.</p>
+</div>
+
+<hr class="divider">
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<h2>Edge Rings (Replace God Rays)</h2>
+<p>Instead of volumetric light shafts, randomly-sized circle rings drift at the edges of the viewport. They evoke light refracting through the water column — distant, ambient, not directional. Subtle and organic.</p>
+
+<div class="viewport" style="overflow: hidden;">
+  <div class="viewport-label" style="background: rgba(10,30,50,0.85); color: #60d8c0;">Edge Rings — 2D Screen-Space Overlay</div>
+  <svg viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <linearGradient id="ring-bg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#1a6878"/>
+        <stop offset="100%" stop-color="#0a2838"/>
+      </linearGradient>
+    </defs>
+
+    <!-- Background -->
+    <rect width="1000" height="500" fill="url(#ring-bg)"/>
+
+    <!-- Faint caustic surface at top -->
+    <g opacity="0.15" stroke="#60d8c0" fill="none" stroke-width="0.8">
+      <path d="M 50,20 Q 100,8 150,25 Q 180,45 160,70 Q 120,80 80,65 Q 45,45 50,20"/>
+      <path d="M 180,15 Q 240,5 290,22 Q 315,40 300,65 Q 260,78 215,65 Q 175,42 180,15"/>
+      <path d="M 320,10 Q 380,3 430,20 Q 455,38 440,62 Q 400,75 355,62 Q 315,40 320,10"/>
+      <path d="M 470,18 Q 520,6 570,23 Q 600,42 585,68 Q 545,80 500,68 Q 465,45 470,18"/>
+      <path d="M 610,12 Q 660,4 710,22 Q 740,40 725,66 Q 685,78 640,66 Q 605,42 610,12"/>
+      <path d="M 750,20 Q 800,8 850,25 Q 880,45 865,70 Q 825,82 780,68 Q 745,48 750,20"/>
+      <path d="M 890,15 Q 935,5 975,25 Q 998,42 985,65 Q 950,75 910,62 Q 885,40 890,15"/>
+    </g>
+
+    <!-- ═══ EDGE RINGS ═══ -->
+    <!-- Top-right corner rings -->
+    <circle cx="920" cy="60" r="45" fill="none" stroke="#60d8c0" stroke-width="1.5" opacity="0.1"/>
+    <circle cx="970" cy="110" r="28" fill="none" stroke="#60d8c0" stroke-width="1" opacity="0.07"/>
+    <circle cx="880" cy="30" r="65" fill="none" stroke="#40b8d0" stroke-width="1.2" opacity="0.06"/>
+
+    <!-- Left edge rings -->
+    <circle cx="30" cy="200" r="55" fill="none" stroke="#60d8c0" stroke-width="1.5" opacity="0.09"/>
+    <circle cx="-10" cy="320" r="35" fill="none" stroke="#40b8d0" stroke-width="1" opacity="0.08"/>
+    <circle cx="50" cy="140" r="22" fill="none" stroke="#60d8c0" stroke-width="1.2" opacity="0.12"/>
+
+    <!-- Bottom-left rings -->
+    <circle cx="80" cy="460" r="50" fill="none" stroke="#60d8c0" stroke-width="1.3" opacity="0.07"/>
+    <circle cx="20" cy="420" r="30" fill="none" stroke="#40b8d0" stroke-width="1" opacity="0.09"/>
+
+    <!-- Right edge -->
+    <circle cx="980" cy="300" r="40" fill="none" stroke="#60d8c0" stroke-width="1" opacity="0.08"/>
+    <circle cx="960" cy="400" r="70" fill="none" stroke="#40b8d0" stroke-width="1.5" opacity="0.05"/>
+
+    <!-- Bottom-right -->
+    <circle cx="850" cy="480" r="32" fill="none" stroke="#60d8c0" stroke-width="1.2" opacity="0.1"/>
+
+    <!-- Top-left -->
+    <circle cx="40" cy="50" r="38" fill="none" stroke="#40b8d0" stroke-width="1" opacity="0.06"/>
+
+    <!-- Vehicle + trail in center (unobstructed by rings) -->
+    <g transform="translate(480, 260)">
+      <rect x="-20" y="-8" width="40" height="16" rx="4" fill="#a0c0c8" stroke="#40b8d0" stroke-width="1"/>
+      <rect x="-28" y="-6" width="8" height="5" rx="2" fill="#708888"/>
+      <rect x="-28" y="1" width="8" height="5" rx="2" fill="#708888"/>
+      <rect x="20" y="-6" width="8" height="5" rx="2" fill="#708888"/>
+      <rect x="20" y="1" width="8" height="5" rx="2" fill="#708888"/>
+      <circle cx="14" cy="0" r="3" fill="#ffdd40" opacity="0.7"/>
+    </g>
+
+    <polyline points="480,260 420,264 350,256 280,266 210,254 150,262"
+      fill="none" stroke="#40c8a0" stroke-width="2" opacity="0.5"/>
+
+    <!-- Particles -->
+    <circle cx="200" cy="180" r="1" fill="#80b0c0" opacity="0.2"/>
+    <circle cx="600" cy="340" r="1.3" fill="#90c0d0" opacity="0.18"/>
+    <circle cx="750" cy="160" r="0.8" fill="#80b0c0" opacity="0.22"/>
+    <circle cx="350" cy="380" r="1.1" fill="#80b0c0" opacity="0.15"/>
+  </svg>
+</div>
+
+<div class="impl-note">
+  <p style="color: var(--text); margin-bottom: 12px;"><strong>Edge rings are a 2D screen-space overlay, drawn after EndMode3D():</strong></p>
+<pre>
+<span class="cm">// ~8-12 ring slots, each with random state</span>
+<span class="kw">typedef struct</span> {
+    <span class="kw">float</span> x, y;         <span class="cm">// screen position (spawns at edge)</span>
+    <span class="kw">float</span> radius;       <span class="cm">// 20-80px (randomly assigned on spawn)</span>
+    <span class="kw">float</span> dx, dy;       <span class="cm">// drift velocity (toward center, slow)</span>
+    <span class="kw">float</span> life;         <span class="cm">// 0→1, fades in then out</span>
+    <span class="kw">float</span> life_max;     <span class="cm">// 4-8 seconds</span>
+    <span class="kw">float</span> thickness;    <span class="cm">// 1.0-2.0px</span>
+} <span class="type">edge_ring_t</span>;
+
+<span class="cm">// On spawn: pick random edge (top/bottom/left/right)</span>
+<span class="cm">// Position starts partially off-screen</span>
+<span class="cm">// Drift: 5-15px/sec inward + slight lateral wander</span>
+<span class="cm">// Alpha: fade in over 15%, hold, fade out over 20%</span>
+<span class="cm">// Color: mode accent at 0.05-0.12 alpha</span>
+<span class="cm">// On death: respawn at new random edge position</span>
+
+<span class="cm">// Draw with DrawCircleLines() or DrawRing() in 2D overlay</span>
+<span class="fn">DrawRing</span>(center, ring->radius - <span class="num">0.5f</span>, ring->radius + <span class="num">0.5f</span>,
+         <span class="num">0</span>, <span class="num">360</span>, <span class="num">36</span>, <span class="fn">Fade</span>(accent, alpha));
+</pre>
+  <p style="color: var(--text-dim); font-size: 0.85em; margin-top: 8px;">~40 lines of C. No GPU cost beyond a handful of <code>DrawRing</code> calls. Stays at the periphery — never obscures the vehicle or HUD. Feels ambient, not distracting.</p>
+</div>
+
+<hr class="divider">
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- MODE 1: GRID ──────────────────────────────────────────────── -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+
+<h2 style="color: #40b8d0;">
+  Grid — Open Water
+  <span class="mode-tag" style="background: #0e2a3a; color: #40b8d0; border: 1px solid #1a4060;">VIEW_GRID</span>
+</h2>
+<p>The default mode becomes mid-depth open ocean (15-30m). Clear blue-green water, caustic patterns on the surface above, moderate visibility. Same neutral-functional philosophy as air Grid, just submerged.</p>
+
+<div class="viewport">
+  <div class="viewport-label" style="background: rgba(10,30,50,0.85); color: #40b8d0;">GRID — Open Water · -22m</div>
+  <svg viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <linearGradient id="grid-uw" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#1a6878"/>
+        <stop offset="40%" stop-color="#0e3850"/>
+        <stop offset="100%" stop-color="#081828"/>
+      </linearGradient>
+    </defs>
+
+    <rect width="1000" height="500" fill="url(#grid-uw)"/>
+
+    <!-- Caustic surface above (upper portion) -->
+    <g opacity="0.2" stroke="#60d8c0" fill="none" stroke-width="1">
+      <path d="M 40,25 Q 90,12 140,30 Q 170,50 150,75 Q 110,85 70,70 Q 35,50 40,25"/>
+      <path d="M 170,18 Q 230,8 280,28 Q 310,48 295,72 Q 255,85 210,72 Q 165,48 170,18"/>
+      <path d="M 310,22 Q 370,10 420,30 Q 450,50 435,75 Q 395,88 350,75 Q 305,50 310,22"/>
+      <path d="M 455,15 Q 510,5 560,25 Q 590,45 575,70 Q 535,82 490,70 Q 450,48 455,15"/>
+      <path d="M 595,20 Q 650,8 700,28 Q 730,48 715,72 Q 675,85 630,72 Q 590,48 595,20"/>
+      <path d="M 735,25 Q 790,12 840,32 Q 870,50 855,75 Q 815,88 770,75 Q 730,52 735,25"/>
+      <path d="M 870,18 Q 920,8 965,28 Q 990,45 978,68 Q 945,78 905,68 Q 865,45 870,18"/>
+    </g>
+    <g opacity="0.1" stroke="#90f0e0" fill="none" stroke-width="0.5">
+      <path d="M 100,40 Q 125,30 145,48 Q 135,65 112,60 Q 90,50 100,40"/>
+      <path d="M 245,35 Q 270,25 290,43 Q 280,60 258,55 Q 238,45 245,35"/>
+      <path d="M 380,38 Q 405,28 425,46 Q 415,63 393,58 Q 373,48 380,38"/>
+      <path d="M 520,32 Q 545,22 565,40 Q 555,58 533,53 Q 513,42 520,32"/>
+      <path d="M 660,36 Q 685,26 705,44 Q 695,62 673,57 Q 653,46 660,36"/>
+      <path d="M 800,40 Q 825,30 845,48 Q 835,65 813,60 Q 793,50 800,40"/>
+    </g>
+
+    <!-- Depth fade overlay -->
+    <rect x="0" y="90" width="1000" height="410" fill="url(#grid-uw)" opacity="0.4"/>
+
+    <!-- Edge rings -->
+    <circle cx="950" cy="80" r="42" fill="none" stroke="#40b8d0" stroke-width="1.2" opacity="0.08"/>
+    <circle cx="30" cy="250" r="55" fill="none" stroke="#60d8c0" stroke-width="1.5" opacity="0.07"/>
+    <circle cx="980" cy="350" r="30" fill="none" stroke="#60d8c0" stroke-width="1" opacity="0.09"/>
+    <circle cx="60" cy="440" r="48" fill="none" stroke="#40b8d0" stroke-width="1.3" opacity="0.06"/>
+    <circle cx="920" cy="460" r="35" fill="none" stroke="#60d8c0" stroke-width="1" opacity="0.08"/>
+    <circle cx="15" cy="80" r="25" fill="none" stroke="#40b8d0" stroke-width="1" opacity="0.1"/>
+
+    <!-- Particles -->
+    <circle cx="180" cy="200" r="1.2" fill="#80b0c0" opacity="0.22"/>
+    <circle cx="420" cy="320" r="0.9" fill="#80b0c0" opacity="0.18"/>
+    <circle cx="680" cy="180" r="1.4" fill="#90c0d0" opacity="0.2"/>
+    <circle cx="820" cy="350" r="1" fill="#80b0c0" opacity="0.15"/>
+    <circle cx="300" cy="400" r="1.1" fill="#80b0c0" opacity="0.2"/>
+    <circle cx="550" cy="280" r="0.8" fill="#90c0d0" opacity="0.16"/>
+
+    <!-- Vehicle -->
+    <g transform="translate(480, 260)">
+      <rect x="-22" y="-9" width="44" height="18" rx="5" fill="#b0c8d0" stroke="#40b8d0" stroke-width="1"/>
+      <rect x="-30" y="-7" width="8" height="5" rx="2" fill="#708888"/>
+      <rect x="-30" y="2" width="8" height="5" rx="2" fill="#708888"/>
+      <rect x="22" y="-7" width="8" height="5" rx="2" fill="#708888"/>
+      <rect x="22" y="2" width="8" height="5" rx="2" fill="#708888"/>
+      <circle cx="15" cy="0" r="3" fill="#ffdd40" opacity="0.7"/>
+    </g>
+
+    <!-- Trail -->
+    <polyline points="480,260 430,263 370,257 310,265 250,254 190,261 140,253 100,258"
+      fill="none" stroke="#40c8a0" stroke-width="2" opacity="0.55"/>
+  </svg>
+</div>
+
+<h3>Color Palette</h3>
+<div class="palette">
+  <div class="swatch"><div class="swatch-color" style="background: #081828;"></div><div class="swatch-info"><div class="swatch-name">Water (Deep)</div><div class="swatch-rgb">(8, 24, 40)</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: #1a6878;"></div><div class="swatch-info"><div class="swatch-name">Water (Surface)</div><div class="swatch-rgb">(26, 104, 120)</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: #60d8c0;"></div><div class="swatch-info"><div class="swatch-name">Caustic Color</div><div class="swatch-rgb">(96, 216, 192)</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: #40b8d0;"></div><div class="swatch-info"><div class="swatch-name">HUD Accent</div><div class="swatch-rgb">(64, 184, 208)</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: #40ffb0;"></div><div class="swatch-info"><div class="swatch-name">HUD Highlight</div><div class="swatch-rgb">(64, 255, 176)</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: #0e3040;"></div><div class="swatch-info"><div class="swatch-name">Fog Color</div><div class="swatch-rgb">(14, 48, 64)</div></div></div>
+</div>
+
+<h3>HUD</h3>
+<div class="hud-strip" style="background: rgba(8,20,30,0.85); border-color: rgba(64,184,208,0.3);">
+  <div class="hud-item"><span class="hud-label" style="color: #2a7888;">depth</span><span class="hud-value" style="color: #40b8d0;">22.4m</span></div>
+  <div class="hud-item"><span class="hud-label" style="color: #2a7888;">speed</span><span class="hud-value" style="color: #40b8d0;">1.8 m/s</span></div>
+  <div class="hud-item"><span class="hud-label" style="color: #2a7888;">heading</span><span class="hud-value" style="color: #40b8d0;">178°</span></div>
+  <div class="hud-item"><span class="hud-label" style="color: #2a7888;">vert</span><span class="hud-value" style="color: #40ffb0;">▼ 0.3</span></div>
+</div>
+
+<hr class="divider">
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- MODE 2: REZ ───────────────────────────────────────────────── -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+
+<h2 style="color: #30e8b0;">
+  Rez — Bioluminescent Abyss
+  <span class="mode-tag" style="background: #0a1a20; color: #30e8b0; border: 1px solid #1a3830;">VIEW_REZ</span>
+</h2>
+<p>200m+ deep. No sunlight, no caustics — just blackness with bioluminescent organisms. The vehicle's headlight is the only directional light source. Edge rings glow green. The surface is too far above to see.</p>
+
+<div class="viewport">
+  <div class="viewport-label" style="background: rgba(4,10,12,0.9); color: #30e8b0;">REZ — Bioluminescent Abyss · -215m</div>
+  <svg viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <linearGradient id="rez-uw" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#060810"/>
+        <stop offset="100%" stop-color="#020406"/>
+      </linearGradient>
+      <radialGradient id="headlight" cx="55%" cy="48%" r="25%">
+        <stop offset="0%" stop-color="#ffdd40" stop-opacity="0.18"/>
+        <stop offset="40%" stop-color="#ffdd40" stop-opacity="0.05"/>
+        <stop offset="100%" stop-color="#ffdd40" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+
+    <!-- Near-black abyss -->
+    <rect width="1000" height="500" fill="url(#rez-uw)"/>
+
+    <!-- No caustic surface — too deep, surface not visible -->
+
+    <!-- Vehicle headlight cone -->
+    <ellipse cx="530" cy="260" rx="150" ry="100" fill="url(#headlight)"/>
+
+    <!-- Bioluminescent organisms (dots with soft glow) -->
+    <circle cx="200" cy="150" r="2" fill="#30e8b0" opacity="0.4"/>
+    <circle cx="200" cy="150" r="10" fill="#30e8b0" opacity="0.03"/>
+
+    <circle cx="750" cy="120" r="1.5" fill="#20a0ff" opacity="0.3"/>
+    <circle cx="750" cy="120" r="7" fill="#20a0ff" opacity="0.025"/>
+
+    <circle cx="380" cy="380" r="2.2" fill="#30e8b0" opacity="0.35"/>
+    <circle cx="380" cy="380" r="9" fill="#30e8b0" opacity="0.03"/>
+
+    <circle cx="850" cy="330" r="1.3" fill="#8060ff" opacity="0.3"/>
+    <circle cx="850" cy="330" r="6" fill="#8060ff" opacity="0.025"/>
+
+    <circle cx="120" cy="350" r="1.8" fill="#20a0ff" opacity="0.25"/>
+    <circle cx="120" cy="350" r="8" fill="#20a0ff" opacity="0.02"/>
+
+    <circle cx="600" cy="80" r="1.5" fill="#30e8b0" opacity="0.3"/>
+    <circle cx="600" cy="80" r="7" fill="#30e8b0" opacity="0.025"/>
+
+    <circle cx="450" cy="430" r="1.2" fill="#30e8b0" opacity="0.28"/>
+    <circle cx="450" cy="430" r="5" fill="#30e8b0" opacity="0.02"/>
+
+    <circle cx="900" cy="200" r="2" fill="#20a0ff" opacity="0.2"/>
+    <circle cx="900" cy="200" r="9" fill="#20a0ff" opacity="0.02"/>
+
+    <!-- Edge rings (bioluminescent green) -->
+    <circle cx="960" cy="100" r="50" fill="none" stroke="#30e8b0" stroke-width="1.2" opacity="0.06"/>
+    <circle cx="20" cy="200" r="38" fill="none" stroke="#30e8b0" stroke-width="1" opacity="0.08"/>
+    <circle cx="970" cy="380" r="60" fill="none" stroke="#20a0ff" stroke-width="1.5" opacity="0.04"/>
+    <circle cx="40" cy="420" r="28" fill="none" stroke="#30e8b0" stroke-width="1" opacity="0.07"/>
+    <circle cx="900" cy="460" r="35" fill="none" stroke="#30e8b0" stroke-width="1.2" opacity="0.05"/>
+    <circle cx="50" cy="60" r="45" fill="none" stroke="#20a0ff" stroke-width="1" opacity="0.05"/>
+    <circle cx="30" cy="300" r="22" fill="none" stroke="#30e8b0" stroke-width="0.8" opacity="0.09"/>
+
+    <!-- Vehicle -->
+    <g transform="translate(480, 260)">
+      <rect x="-20" y="-8" width="40" height="16" rx="4" fill="#708088" stroke="#30e8b0" stroke-width="0.8"/>
+      <rect x="-28" y="-6" width="8" height="5" rx="2" fill="#384048"/>
+      <rect x="-28" y="1" width="8" height="5" rx="2" fill="#384048"/>
+      <rect x="20" y="-6" width="8" height="5" rx="2" fill="#384048"/>
+      <rect x="20" y="1" width="8" height="5" rx="2" fill="#384048"/>
+      <circle cx="14" cy="0" r="3.5" fill="#ffdd40" opacity="0.9"/>
+      <circle cx="14" cy="0" r="12" fill="#ffdd40" opacity="0.06"/>
+    </g>
+
+    <!-- Trail (bioluminescent wake) -->
+    <polyline points="480,260 430,263 370,257 310,265 250,254 190,261"
+      fill="none" stroke="#30e8b0" stroke-width="2" opacity="0.45"/>
+    <polyline points="480,260 430,263 370,257 310,265 250,254 190,261"
+      fill="none" stroke="#30e8b0" stroke-width="7" opacity="0.03"/>
+  </svg>
+</div>
+
+<h3>Color Palette</h3>
+<div class="palette">
+  <div class="swatch"><div class="swatch-color" style="background: #020406;"></div><div class="swatch-info"><div class="swatch-name">Void</div><div class="swatch-rgb">(2, 4, 6)</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: #30e8b0;"></div><div class="swatch-info"><div class="swatch-name">Biolum / Accent</div><div class="swatch-rgb">(48, 232, 176)</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: #20a0ff;"></div><div class="swatch-info"><div class="swatch-name">Secondary Glow</div><div class="swatch-rgb">(32, 160, 255)</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: #ffdd40;"></div><div class="swatch-info"><div class="swatch-name">Headlight</div><div class="swatch-rgb">(255, 221, 64)</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: #ff6820;"></div><div class="swatch-info"><div class="swatch-name">HUD Highlight</div><div class="swatch-rgb">(255, 104, 32)</div></div></div>
+</div>
+
+<h3>Key Differences from Other Modes</h3>
+<div class="side-by-side">
+  <div class="side-card">
+    <h4 style="color: #30e8b0;">No Surface Reference</h4>
+    <ul>
+      <li>At 200m+ depth, the caustic surface is invisible — too far and too dark</li>
+      <li>No caustic shader runs — surface plane not rendered</li>
+      <li>Spatial reference comes from bioluminescent particles and the trail only</li>
+      <li>Fog range extremely short: 20m → 60m</li>
+      <li>This is intentionally disorienting — deep sea IS disorienting</li>
+    </ul>
+  </div>
+  <div class="side-card">
+    <h4 style="color: #ffdd40;">Vehicle Headlight</h4>
+    <ul>
+      <li>Radial gradient centered on vehicle's forward direction</li>
+      <li>Only light source in the scene (besides bioluminescence)</li>
+      <li>Illuminates particles and nearby water</li>
+      <li>Could be a simple additive-blend billboard quad</li>
+      <li>Consistent with air Rez: the vehicle stands out against darkness</li>
+    </ul>
+  </div>
+</div>
+
+<h3>HUD</h3>
+<div class="hud-strip" style="background: rgba(4,8,12,0.9); border-color: rgba(48,232,176,0.25);">
+  <div class="hud-item"><span class="hud-label" style="color: rgba(48,232,176,0.5);">depth</span><span class="hud-value" style="color: #30e8b0;">214.8m</span></div>
+  <div class="hud-item"><span class="hud-label" style="color: rgba(48,232,176,0.5);">speed</span><span class="hud-value" style="color: #30e8b0;">0.6 m/s</span></div>
+  <div class="hud-item"><span class="hud-label" style="color: rgba(48,232,176,0.5);">heading</span><span class="hud-value" style="color: #30e8b0;">312°</span></div>
+  <div class="hud-item"><span class="hud-label" style="color: rgba(48,232,176,0.5);">vert</span><span class="hud-value" style="color: #ff6820;">▼ 1.2</span></div>
+</div>
+
+<hr class="divider">
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- MODE 3: SNOW ──────────────────────────────────────────────── -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+
+<h2 style="color: #10a8c0;">
+  Snow — Tropical Shallows
+  <span class="mode-tag" style="background: #e8f4f8; color: #10889a; border: 1px solid #b0d8e0;">VIEW_SNOW</span>
+</h2>
+<p>2-8m deep. Brilliant clear Caribbean water. Strong caustics — the surface is right there, filling the upper half of the view with dancing light. Brightest underwater mode, matching Snow's role as the brightest air mode. Flat ribbon trails (same as Snow uses in air).</p>
+
+<div class="viewport">
+  <div class="viewport-label" style="background: rgba(230,244,248,0.9); color: #10889a;">SNOW — Tropical Shallows · -4m</div>
+  <svg viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <linearGradient id="snow-uw" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#58d0e0"/>
+        <stop offset="25%" stop-color="#38b0c8"/>
+        <stop offset="60%" stop-color="#2090a8"/>
+        <stop offset="100%" stop-color="#187888"/>
+      </linearGradient>
+    </defs>
+
+    <!-- Bright tropical water -->
+    <rect width="1000" height="500" fill="url(#snow-uw)"/>
+
+    <!-- Bright surface shimmer -->
+    <rect x="0" y="0" width="1000" height="2" fill="#c0f0f8" opacity="0.5"/>
+
+    <!-- Strong caustic pattern — surface is very close, lots of light -->
+    <!-- Large, bright caustic cells -->
+    <g opacity="0.3" stroke="#a0e8e0" fill="none" stroke-width="1.8">
+      <path d="M 30,30 Q 100,10 170,35 Q 210,65 185,100 Q 130,120 70,95 Q 20,65 30,30"/>
+      <path d="M 200,20 Q 280,5 350,30 Q 390,60 370,100 Q 310,120 250,95 Q 195,60 200,20"/>
+      <path d="M 380,25 Q 460,8 530,32 Q 570,62 550,100 Q 490,118 430,95 Q 375,60 380,25"/>
+      <path d="M 560,18 Q 640,5 710,30 Q 745,58 730,95 Q 670,115 610,92 Q 555,58 560,18"/>
+      <path d="M 740,28 Q 815,10 885,35 Q 920,62 905,98 Q 845,118 785,95 Q 735,62 740,28"/>
+      <path d="M 910,22 Q 960,12 998,30 Q 1000,55 990,80 Q 955,95 925,82 Q 905,55 910,22"/>
+    </g>
+    <!-- Inner bright highlights (big and vivid at this depth) -->
+    <g opacity="0.2" stroke="#c0f8f0" fill="none" stroke-width="0.8">
+      <path d="M 100,50 Q 140,35 165,58 Q 150,85 118,78 Q 88,65 100,50"/>
+      <path d="M 280,38 Q 320,25 345,48 Q 332,72 305,68 Q 275,55 280,38"/>
+      <path d="M 460,42 Q 500,28 525,50 Q 512,75 485,70 Q 455,58 460,42"/>
+      <path d="M 630,35 Q 670,22 695,45 Q 682,68 655,63 Q 625,50 630,35"/>
+      <path d="M 810,45 Q 848,32 872,54 Q 860,78 834,73 Q 805,60 810,45"/>
+    </g>
+
+    <!-- Second row of caustics (lower, dimmer — further from surface) -->
+    <g opacity="0.12" stroke="#80c8c0" fill="none" stroke-width="1">
+      <path d="M 60,120 Q 120,105 170,125 Q 195,148 180,175 Q 135,188 90,170 Q 55,148 60,120"/>
+      <path d="M 220,115 Q 290,100 350,122 Q 380,145 365,175 Q 310,190 260,172 Q 215,148 220,115"/>
+      <path d="M 400,118 Q 470,102 530,125 Q 560,148 545,178 Q 490,192 440,175 Q 395,150 400,118"/>
+      <path d="M 580,112 Q 645,98 705,120 Q 735,142 720,172 Q 665,185 615,168 Q 575,145 580,112"/>
+      <path d="M 750,120 Q 815,105 875,125 Q 905,148 890,178 Q 835,192 785,175 Q 745,150 750,120"/>
+    </g>
+
+    <!-- Edge rings (muted teal on bright background) -->
+    <circle cx="940" cy="70" r="40" fill="none" stroke="#1090a0" stroke-width="1.5" opacity="0.12"/>
+    <circle cx="30" cy="180" r="55" fill="none" stroke="#1090a0" stroke-width="1.2" opacity="0.08"/>
+    <circle cx="970" cy="350" r="32" fill="none" stroke="#10a8b8" stroke-width="1" opacity="0.1"/>
+    <circle cx="50" cy="430" r="45" fill="none" stroke="#1090a0" stroke-width="1.3" opacity="0.07"/>
+    <circle cx="20" cy="70" r="28" fill="none" stroke="#10a8b8" stroke-width="1" opacity="0.09"/>
+    <circle cx="960" cy="460" r="38" fill="none" stroke="#1090a0" stroke-width="1.2" opacity="0.06"/>
+
+    <!-- Very sparse particles (clean tropical water) -->
+    <circle cx="300" cy="280" r="1" fill="#a0d0c8" opacity="0.2"/>
+    <circle cx="700" cy="350" r="0.8" fill="#a0d0c8" opacity="0.15"/>
+    <circle cx="550" cy="400" r="1.2" fill="#b0d8d0" opacity="0.18"/>
+
+    <!-- Vehicle (clearly visible in bright water) -->
+    <g transform="translate(500, 300)">
+      <rect x="-22" y="-9" width="44" height="18" rx="5" fill="#e0e8e8" stroke="#10889a" stroke-width="1.2"/>
+      <rect x="-30" y="-7" width="8" height="5" rx="2" fill="#a0b8b8"/>
+      <rect x="-30" y="2" width="8" height="5" rx="2" fill="#a0b8b8"/>
+      <rect x="22" y="-7" width="8" height="5" rx="2" fill="#a0b8b8"/>
+      <rect x="22" y="2" width="8" height="5" rx="2" fill="#a0b8b8"/>
+      <circle cx="15" cy="0" r="3" fill="#ffdd40"/>
+    </g>
+
+    <!-- Flat ribbon trail (Snow uses ribbons) -->
+    <polygon points="500,295 450,298 390,292 330,300 270,290 220,296 220,310 270,304 330,314 390,306 450,312 500,308"
+      fill="none" stroke="#108870" stroke-width="2.5" opacity="0.5"/>
+  </svg>
+</div>
+
+<h3>Color Palette</h3>
+<div class="palette">
+  <div class="swatch"><div class="swatch-color" style="background: #58d0e0;"></div><div class="swatch-info"><div class="swatch-name">Water (Surface)</div><div class="swatch-rgb">(88, 208, 224)</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: #187888;"></div><div class="swatch-info"><div class="swatch-name">Water (Deep)</div><div class="swatch-rgb">(24, 120, 136)</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: #a0e8e0;"></div><div class="swatch-info"><div class="swatch-name">Caustic Color</div><div class="swatch-rgb">(160, 232, 224)</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: #10889a;"></div><div class="swatch-info"><div class="swatch-name">HUD Accent</div><div class="swatch-rgb">(16, 136, 154)</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: #d04020;"></div><div class="swatch-info"><div class="swatch-name">HUD Highlight</div><div class="swatch-rgb">(208, 64, 32)</div></div></div>
+</div>
+
+<h3>Key Differences</h3>
+<p>Caustics are <strong>much larger and brighter</strong> than Grid mode — the surface is only 4m away. They fill a huge portion of the upper view. Very few particles (clean tropical water). Fog range is long (100m → 300m) — you can see far in the shallows. Ribbon trail style preserved from air Snow mode.</p>
+
+<h3>HUD</h3>
+<div class="hud-strip" style="background: rgba(230,242,240,0.9); border-color: rgba(16,136,154,0.3);">
+  <div class="hud-item"><span class="hud-label" style="color: #60908a;">depth</span><span class="hud-value" style="color: #10889a;">4.2m</span></div>
+  <div class="hud-item"><span class="hud-label" style="color: #60908a;">speed</span><span class="hud-value" style="color: #10889a;">2.1 m/s</span></div>
+  <div class="hud-item"><span class="hud-label" style="color: #60908a;">heading</span><span class="hud-value" style="color: #10889a;">045°</span></div>
+  <div class="hud-item"><span class="hud-label" style="color: #60908a;">vert</span><span class="hud-value" style="color: #d04020;">▲ 0.4</span></div>
+</div>
+
+<hr class="divider">
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- MODE 4: 1988 ──────────────────────────────────────────────── -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+
+<h2 style="color: #ff2080;">
+  1988 — Neon Reef
+  <span class="mode-tag" style="background: #180820; color: #ff2080; border: 1px solid #401040;">VIEW_1988</span>
+</h2>
+<p>Vaporwave ocean. Wireframe coral replaces wireframe mountains (same noise generator, different params). Hot pink caustics on the surface. Jellyfish-like bioluminescent particles. This is the surreal one.</p>
+
+<div class="viewport">
+  <div class="viewport-label" style="background: rgba(10,4,18,0.9); color: #ff2080;">1988 — Neon Reef · -35m</div>
+  <svg viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <linearGradient id="uw-1988" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#180830"/>
+        <stop offset="40%" stop-color="#0c0420"/>
+        <stop offset="100%" stop-color="#060310"/>
+      </linearGradient>
+    </defs>
+
+    <!-- Deep neon void -->
+    <rect width="1000" height="500" fill="url(#uw-1988)"/>
+
+    <!-- Pink caustic surface (dimmer — 35m deep) -->
+    <g opacity="0.12" stroke="#ff2080" fill="none" stroke-width="1">
+      <path d="M 50,22 Q 110,8 170,28 Q 200,50 185,78 Q 135,92 80,75 Q 45,52 50,22"/>
+      <path d="M 200,18 Q 270,5 340,25 Q 375,48 358,78 Q 300,92 245,75 Q 195,50 200,18"/>
+      <path d="M 370,22 Q 440,8 510,28 Q 545,50 528,78 Q 470,92 415,75 Q 365,52 370,22"/>
+      <path d="M 540,15 Q 610,4 680,25 Q 715,48 698,75 Q 640,88 585,72 Q 535,48 540,15"/>
+      <path d="M 710,22 Q 780,8 850,28 Q 885,50 868,78 Q 810,92 755,75 Q 705,52 710,22"/>
+      <path d="M 875,18 Q 930,8 975,28 Q 998,48 988,72 Q 950,82 915,70 Q 870,48 875,18"/>
+    </g>
+    <g opacity="0.06" stroke="#ff60a0" fill="none" stroke-width="0.5">
+      <path d="M 120,38 Q 148,28 168,45 Q 158,65 135,60 Q 112,50 120,38"/>
+      <path d="M 290,32 Q 318,22 338,40 Q 328,58 305,55 Q 282,45 290,32"/>
+      <path d="M 460,35 Q 488,25 508,42 Q 498,62 475,58 Q 452,48 460,35"/>
+      <path d="M 630,30 Q 658,20 678,38 Q 668,56 645,52 Q 622,42 630,30"/>
+      <path d="M 800,38 Q 828,28 848,45 Q 838,65 815,60 Q 792,50 800,38"/>
+    </g>
+
+    <!-- Faint pink glow at surface line -->
+    <rect x="0" y="0" width="1000" height="3" fill="#ff2080" opacity="0.1"/>
+
+    <!-- ═══ WIREFRAME CORAL ═══ -->
+    <!-- Left cluster -->
+    <g opacity="0.7">
+      <polyline points="100,500 100,440 92,400 88,365" fill="none" stroke="#ff2080" stroke-width="1.2"/>
+      <polyline points="100,440 118,415 128,385" fill="none" stroke="#ff2080" stroke-width="1"/>
+      <polyline points="92,400 78,375 72,345" fill="none" stroke="#ff2080" stroke-width="0.8"/>
+      <polyline points="88,365 82,340 92,320" fill="none" stroke="#ff2080" stroke-width="0.7"/>
+      <polyline points="128,385 140,360 135,340" fill="none" stroke="#ff2080" stroke-width="0.7"/>
+      <circle cx="92" cy="320" r="4" fill="#ff2080" opacity="0.12"/>
+      <circle cx="72" cy="345" r="3" fill="#ff2080" opacity="0.1"/>
+      <circle cx="135" cy="340" r="3.5" fill="#ff2080" opacity="0.08"/>
+    </g>
+
+    <!-- Center-left cluster (cyan) -->
+    <g opacity="0.5">
+      <polyline points="300,500 295,450 280,415 275,385" fill="none" stroke="#15befc" stroke-width="1"/>
+      <polyline points="295,450 315,425 325,395 318,375" fill="none" stroke="#15befc" stroke-width="0.8"/>
+      <polyline points="280,415 262,390 258,365" fill="none" stroke="#15befc" stroke-width="0.7"/>
+      <circle cx="275" cy="385" r="3" fill="#15befc" opacity="0.08"/>
+      <circle cx="318" cy="375" r="3" fill="#15befc" opacity="0.06"/>
+      <circle cx="258" cy="365" r="2.5" fill="#15befc" opacity="0.06"/>
+    </g>
+
+    <!-- Right cluster -->
+    <g opacity="0.65">
+      <polyline points="820,500 815,445 832,410 825,375 838,355" fill="none" stroke="#ff2080" stroke-width="1.2"/>
+      <polyline points="815,445 798,415 788,385" fill="none" stroke="#ff2080" stroke-width="0.9"/>
+      <polyline points="832,410 855,390 862,365 858,342" fill="none" stroke="#ff2080" stroke-width="0.8"/>
+      <polyline points="825,375 808,358 802,338" fill="none" stroke="#ff2080" stroke-width="0.7"/>
+      <circle cx="838" cy="355" r="4" fill="#ff2080" opacity="0.1"/>
+      <circle cx="788" cy="385" r="3" fill="#ff2080" opacity="0.08"/>
+      <circle cx="858" cy="342" r="3.5" fill="#ff2080" opacity="0.08"/>
+      <circle cx="802" cy="338" r="3" fill="#ff2080" opacity="0.06"/>
+    </g>
+
+    <!-- Sea fan wireframe mesh -->
+    <g opacity="0.4">
+      <polygon points="160,500 140,435 180,435" fill="none" stroke="#ff2080" stroke-width="0.6"/>
+      <polygon points="140,435 120,380 160,380" fill="none" stroke="#ff2080" stroke-width="0.5"/>
+      <polygon points="180,435 160,380 200,380" fill="none" stroke="#ff2080" stroke-width="0.5"/>
+      <line x1="140" y1="435" x2="160" y2="380" stroke="#ff2080" stroke-width="0.4"/>
+      <line x1="180" y1="435" x2="160" y2="380" stroke="#ff2080" stroke-width="0.4"/>
+    </g>
+
+    <!-- Distant foggy coral -->
+    <g opacity="0.2">
+      <polyline points="600,500 595,465 590,440 585,420" fill="none" stroke="#ff2080" stroke-width="0.5"/>
+      <polyline points="595,465 610,450 615,430" fill="none" stroke="#ff2080" stroke-width="0.4"/>
+      <polyline points="950,500 945,460 938,435 948,415" fill="none" stroke="#15befc" stroke-width="0.5"/>
+      <polyline points="945,460 958,445" fill="none" stroke="#15befc" stroke-width="0.4"/>
+    </g>
+
+    <!-- Neon jellyfish particles -->
+    <circle cx="420" cy="220" r="2.5" fill="#ff2080" opacity="0.4"/>
+    <circle cx="420" cy="220" r="10" fill="#ff2080" opacity="0.03"/>
+    <line x1="420" y1="223" x2="418" y2="240" stroke="#ff2080" stroke-width="0.5" opacity="0.18"/>
+    <line x1="420" y1="223" x2="423" y2="238" stroke="#ff2080" stroke-width="0.5" opacity="0.12"/>
+
+    <circle cx="720" cy="160" r="2" fill="#15befc" opacity="0.35"/>
+    <circle cx="720" cy="160" r="8" fill="#15befc" opacity="0.025"/>
+    <line x1="720" y1="162" x2="718" y2="178" stroke="#15befc" stroke-width="0.4" opacity="0.12"/>
+
+    <circle cx="250" cy="310" r="1.8" fill="#ff2080" opacity="0.3"/>
+    <circle cx="250" cy="310" r="7" fill="#ff2080" opacity="0.025"/>
+
+    <circle cx="650" cy="380" r="2.2" fill="#15befc" opacity="0.25"/>
+    <circle cx="650" cy="380" r="9" fill="#15befc" opacity="0.02"/>
+    <line x1="650" y1="382" x2="648" y2="396" stroke="#15befc" stroke-width="0.4" opacity="0.1"/>
+
+    <!-- Edge rings (pink neon) -->
+    <circle cx="960" cy="90" r="48" fill="none" stroke="#ff2080" stroke-width="1.2" opacity="0.08"/>
+    <circle cx="20" cy="230" r="40" fill="none" stroke="#ff2080" stroke-width="1" opacity="0.06"/>
+    <circle cx="975" cy="380" r="55" fill="none" stroke="#15befc" stroke-width="1.5" opacity="0.04"/>
+    <circle cx="40" cy="450" r="30" fill="none" stroke="#ff2080" stroke-width="1" opacity="0.07"/>
+    <circle cx="950" cy="460" r="25" fill="none" stroke="#ff2080" stroke-width="0.8" opacity="0.09"/>
+    <circle cx="30" cy="80" r="35" fill="none" stroke="#15befc" stroke-width="1" opacity="0.05"/>
+
+    <!-- Vehicle -->
+    <g transform="translate(480, 280)">
+      <rect x="-20" y="-8" width="40" height="16" rx="4" fill="#302040" stroke="#ff2080" stroke-width="1.2"/>
+      <rect x="-28" y="-6" width="8" height="5" rx="2" fill="#201030"/>
+      <rect x="-28" y="1" width="8" height="5" rx="2" fill="#201030"/>
+      <rect x="20" y="-6" width="8" height="5" rx="2" fill="#201030"/>
+      <rect x="20" y="1" width="8" height="5" rx="2" fill="#201030"/>
+      <line x1="-20" y1="-8" x2="20" y2="-8" stroke="#ff2080" stroke-width="0.5" opacity="0.5"/>
+      <line x1="-20" y1="8" x2="20" y2="8" stroke="#15befc" stroke-width="0.5" opacity="0.5"/>
+      <circle cx="14" cy="0" r="3" fill="#15befc" opacity="0.9"/>
+      <circle cx="14" cy="0" r="12" fill="#15befc" opacity="0.04"/>
+    </g>
+
+    <!-- Trail -->
+    <polyline points="480,280 430,283 370,277 310,285 250,275 190,282"
+      fill="none" stroke="#ff2080" stroke-width="2" opacity="0.45"/>
+    <polyline points="480,280 430,283 370,277 310,285 250,275 190,282"
+      fill="none" stroke="#ff2080" stroke-width="8" opacity="0.025"/>
+  </svg>
+</div>
+
+<h3>Color Palette</h3>
+<div class="palette">
+  <div class="swatch"><div class="swatch-color" style="background: #060310;"></div><div class="swatch-info"><div class="swatch-name">Deep Void</div><div class="swatch-rgb">(6, 3, 16)</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: #180830;"></div><div class="swatch-info"><div class="swatch-name">Near-Surface</div><div class="swatch-rgb">(24, 8, 48)</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: #ff2080;"></div><div class="swatch-info"><div class="swatch-name">Grid / Coral / Accent</div><div class="swatch-rgb">(255, 32, 128)</div></div></div>
+  <div class="swatch"><div class="swatch-color" style="background: #15befc;"></div><div class="swatch-info"><div class="swatch-name">Secondary / Highlight</div><div class="swatch-rgb">(21, 190, 252)</div></div></div>
+</div>
+
+<h3>Wireframe Coral</h3>
+<div class="impl-note">
+  <p style="color: var(--text); margin-bottom: 12px;">Same generation pipeline as wireframe mountains, different noise parameters:</p>
+<pre>
+<span class="cm">// Mountains → Coral: change noise params only</span>
+<span class="type">CORAL_PEAK</span>   = <span class="num">80.0f</span>    <span class="cm">// shorter than 350m mountains</span>
+<span class="type">CORAL_DEPTH</span>  = <span class="num">150.0f</span>   <span class="cm">// closer to center (reef flat)</span>
+octaves      = <span class="num">5</span>        <span class="cm">// more detail = branching texture</span>
+y_exponent   = <span class="num">2.5f</span>     <span class="cm">// sharper peaks = coral fingers</span>
+
+<span class="cm">// Same shader: mountain.vs + mountain.fs</span>
+<span class="cm">// Wireframe color: #ff2080 instead of #019CE3</span>
+<span class="cm">// Same double-sided, same glow effect</span>
+<span class="cm">// Coral grows UP from the bottom of the scene</span>
+</pre>
+</div>
+
+<h3>HUD</h3>
+<div class="hud-strip" style="background: rgba(8,4,20,0.9); border-color: rgba(255,32,128,0.25);">
+  <div class="hud-item"><span class="hud-label" style="color: rgba(255,32,128,0.5);">depth</span><span class="hud-value" style="color: #ff2080;">35.2m</span></div>
+  <div class="hud-item"><span class="hud-label" style="color: rgba(255,32,128,0.5);">speed</span><span class="hud-value" style="color: #ff2080;">1.4 m/s</span></div>
+  <div class="hud-item"><span class="hud-label" style="color: rgba(255,32,128,0.5);">heading</span><span class="hud-value" style="color: #ff2080;">225°</span></div>
+  <div class="hud-item"><span class="hud-label" style="color: rgba(255,32,128,0.5);">vert</span><span class="hud-value" style="color: #15befc;">▲ 0.8</span></div>
+</div>
+
+<hr class="divider">
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- ORTHO PANELS ──────────────────────────────────────────────── -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+
+<h2 style="color: #4090b0;">Ortho Panels</h2>
+
+<div class="side-by-side">
+  <div class="side-card">
+    <h4 style="color: #40b8d0;">Side View — The Best One</h4>
+    <ul>
+      <li>Horizontal water surface line at Y=0 in the mode's accent color (2px)</li>
+      <li>Above the line: sky color (lighter)</li>
+      <li>Below the line: water color gradient (darker with depth)</li>
+      <li>Vehicle and trail visible below the line</li>
+      <li>Depth markings on Y axis replace altitude markings</li>
+      <li>Caustic shimmer along the surface line (subtle animated pattern)</li>
+      <li>This view immediately communicates "underwater" — the split is iconic</li>
+    </ul>
+  </div>
+  <div class="side-card">
+    <h4 style="color: #40b8d0;">Top-Down View</h4>
+    <ul>
+      <li>Looking straight through the water surface</li>
+      <li>Background: mode's water color (uniform, no gradient)</li>
+      <li>No caustics visible (looking perpendicular to surface)</li>
+      <li>Edge rings still render (screen-space overlay)</li>
+      <li>Trail and vehicle clearly visible</li>
+      <li>Functionally identical to air mode — just recolored</li>
+    </ul>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- FULL COMPARISON ───────────────────────────────────────────── -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+
+<h2 style="color: #60d8c0;">Full Comparison</h2>
+
+<table class="compare-table">
+  <thead>
+    <tr>
+      <th>Element</th>
+      <th style="color: #40b8d0;">Grid</th>
+      <th style="color: #30e8b0;">Rez</th>
+      <th style="color: #10889a;">Snow</th>
+      <th style="color: #ff2080;">1988</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="label-col">Implied Depth</td>
+      <td>15-30m</td>
+      <td>200m+</td>
+      <td>2-8m</td>
+      <td>20-50m</td>
+    </tr>
+    <tr>
+      <td class="label-col">Water Color</td>
+      <td><span class="color-dot" style="background: #1a6878;"></span>Blue-green</td>
+      <td><span class="color-dot" style="background: #020406;"></span>Near-black</td>
+      <td><span class="color-dot" style="background: #58d0e0;"></span>Bright turquoise</td>
+      <td><span class="color-dot" style="background: #0c0420;"></span>Deep purple</td>
+    </tr>
+    <tr>
+      <td class="label-col">Caustic Surface</td>
+      <td>Moderate (visible, not dominant)</td>
+      <td>None (too deep)</td>
+      <td>Strong & bright (very close)</td>
+      <td>Dim pink glow</td>
+    </tr>
+    <tr>
+      <td class="label-col">Caustic Color</td>
+      <td><span class="color-dot" style="background: #60d8c0;"></span>Teal</td>
+      <td>—</td>
+      <td><span class="color-dot" style="background: #a0e8e0;"></span>Bright seafoam</td>
+      <td><span class="color-dot" style="background: #ff2080;"></span>Hot pink</td>
+    </tr>
+    <tr>
+      <td class="label-col">Fog Range</td>
+      <td>60m → 200m</td>
+      <td>20m → 60m</td>
+      <td>100m → 300m</td>
+      <td>40m → 120m</td>
+    </tr>
+    <tr>
+      <td class="label-col">Edge Rings</td>
+      <td><span class="color-dot" style="background: #40b8d0;"></span>Teal, moderate</td>
+      <td><span class="color-dot" style="background: #30e8b0;"></span>Biolum green, sparse</td>
+      <td><span class="color-dot" style="background: #1090a0;"></span>Muted teal, subtle</td>
+      <td><span class="color-dot" style="background: #ff2080;"></span>Neon pink</td>
+    </tr>
+    <tr>
+      <td class="label-col">Particles</td>
+      <td>Marine snow (white dots)</td>
+      <td>Bioluminescent orbs + glow halos</td>
+      <td>Very sparse (clean water)</td>
+      <td>Neon jellyfish with tendrils</td>
+    </tr>
+    <tr>
+      <td class="label-col">Special Geometry</td>
+      <td>—</td>
+      <td>—</td>
+      <td>—</td>
+      <td>Wireframe coral (replaces mtns)</td>
+    </tr>
+    <tr>
+      <td class="label-col">Headlight</td>
+      <td>Subtle warm cone</td>
+      <td>Prominent (only light source)</td>
+      <td>Barely visible</td>
+      <td>Cyan neon cone</td>
+    </tr>
+    <tr>
+      <td class="label-col">Trail Style</td>
+      <td>1px lines</td>
+      <td>1px lines + soft glow</td>
+      <td>Flat ribbons</td>
+      <td>1px lines + neon glow</td>
+    </tr>
+    <tr>
+      <td class="label-col">Vibe</td>
+      <td>Documentary dive footage</td>
+      <td>Subnautica deep zone</td>
+      <td>GoPro snorkeling video</td>
+      <td>Synthwave aquarium</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr class="divider">
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- IMPLEMENTATION ─────────────────────────────────────────────── -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+
+<h2 style="color: #60d8c0;">Implementation Scope</h2>
+
+<table class="compare-table">
+  <thead>
+    <tr><th>Component</th><th>File</th><th>Changes</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="label-col">Toggle & flag</td>
+      <td><code>scene.h/c</code>, <code>main.c</code></td>
+      <td><code>bool is_underwater</code> on scene. KEY_U toggles. Eventually auto-set from <code>mav_type==12</code>. ~8 lines.</td>
+    </tr>
+    <tr>
+      <td class="label-col">Water color tables</td>
+      <td><code>scene.c</code></td>
+      <td>Underwater color arrays per mode (water gradient, caustic color, fog color). ~60 lines of constants.</td>
+    </tr>
+    <tr>
+      <td class="label-col">Grid shader: caustics</td>
+      <td><code>grid.fs</code>, <code>scene.c</code></td>
+      <td>Add <code>is_underwater</code>, <code>time</code> uniforms. Caustic function replaces grid math when set. Double-sided culling toggle. ~35 lines GLSL + ~15 lines C.</td>
+    </tr>
+    <tr>
+      <td class="label-col">Edge rings</td>
+      <td><code>scene.c</code> (or <code>underwater.c</code>)</td>
+      <td>~12 ring structs, spawn/drift/fade logic, DrawRing() in 2D overlay. ~50 lines.</td>
+    </tr>
+    <tr>
+      <td class="label-col">Particles</td>
+      <td><code>scene.c</code></td>
+      <td>~50-100 billboard dots with drift. ~60 lines.</td>
+    </tr>
+    <tr>
+      <td class="label-col">Trail colors</td>
+      <td><code>vehicle.c</code></td>
+      <td>Underwater directional + thermal palettes. ~50 lines of constants.</td>
+    </tr>
+    <tr>
+      <td class="label-col">HUD: DEPTH label + colors</td>
+      <td><code>hud.c</code></td>
+      <td>ALT→DEPTH swap, underwater accent/highlight/bg. ~25 lines.</td>
+    </tr>
+    <tr>
+      <td class="label-col">Coral (1988 only)</td>
+      <td><code>scene.c</code></td>
+      <td>Reuse mountain generator with tweaked noise params + pink color. ~10 lines.</td>
+    </tr>
+    <tr>
+      <td class="label-col">Ortho panel</td>
+      <td><code>ortho_panel.c</code></td>
+      <td>Surface line at Y=0, blue tint below. ~15 lines.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p style="margin-top: 20px;">Total: <strong>~330 lines of C + ~35 lines of GLSL</strong>. No new dependencies. No new shader files (extends <code>grid.fs</code>, reuses <code>mountain.fs</code>). No new textures. No new models (using existing vehicle until ROV model is ready).</p>
+
+</div>
+</body>
+</html>

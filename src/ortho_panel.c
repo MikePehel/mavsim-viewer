@@ -140,7 +140,7 @@ void ortho_panel_render(ortho_panel_t *op, const scene_t *s,
                 for (int i = 0; i < vehicle_count; i++) {
                     if (vehicles[i].active || vehicle_count == 1) {
                         vehicle_draw((vehicle_t *)&vehicles[i], view_mode, i == selected,
-                                     trail_mode, false, op->cameras[v].position, false);
+                                     trail_mode, false, op->cameras[v].position, false, false);
                     }
                 }
             EndMode3D();

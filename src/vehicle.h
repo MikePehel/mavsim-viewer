@@ -102,7 +102,7 @@ void vehicle_update(vehicle_t *v, const hil_state_t *state, const home_position_
 // classic_colors: false = modern (yellow/purple), true = classic (red/blue)
 void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
                   int trail_mode, bool show_ground_track, Vector3 cam_pos,
-                  bool classic_colors);
+                  bool classic_colors, bool is_underwater);
 
 // Reset the path trail.
 void vehicle_reset_trail(vehicle_t *v);

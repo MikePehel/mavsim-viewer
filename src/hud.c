@@ -285,7 +285,7 @@ static void draw_secondary_row(const hud_t *h, const vehicle_t *pv, int pidx,
                                 Font font_label, Font font_value,
                                 Color label_color_dim, Color value_color,
                                 Color warn_color, Color climb_color,
-                                int secondary_h, float scale) {
+                                int secondary_h, float scale, bool is_underwater) {
     float fsl = 14 * scale;
     float fsv = 18 * scale;
     float label_val_gap = 34 * scale;  // gap between label and value on same line
@@ -320,9 +320,9 @@ static void draw_secondary_row(const hud_t *h, const vehicle_t *pv, int pidx,
     snprintf(b, sizeof(b), "%+.0f", pv->pitch_deg);
     DrawTextEx(font_value, b, (Vector2){nav_start + nav_step * 2 + label_val_gap + 8 * scale, (float)text_y}, fsv, 0.5f, value_color);
 
-    // ENERGY: ALT, GS, AS, VS — same X positions as primary
-    DrawTextEx(font_label, "ALT", (Vector2){energy_start, label_off_y}, fsl, 0.5f, label_color_dim);
-    snprintf(b, sizeof(b), "%.1f", pv->altitude_rel);
+    // ENERGY: ALT/DEPTH, GS, AS, VS — same X positions as primary
+    DrawTextEx(font_label, is_underwater ? "DEPTH" : "ALT", (Vector2){energy_start, label_off_y}, fsl, 0.5f, label_color_dim);
+    snprintf(b, sizeof(b), "%.1f", is_underwater ? -pv->altitude_rel : pv->altitude_rel);
     DrawTextEx(font_value, b, (Vector2){energy_start + label_val_gap, (float)text_y}, fsv, 0.5f, value_color);
 
     DrawTextEx(font_label, "GS", (Vector2){energy_start + energy_step, label_off_y}, fsl, 0.5f, label_color_dim);
@@ -349,7 +349,8 @@ static void draw_secondary_row(const hud_t *h, const vehicle_t *pv, int pidx,
 
 void hud_draw(const hud_t *h, const vehicle_t *vehicles,
               const data_source_t *sources, int vehicle_count,
-              int selected, int screen_w, int screen_h, view_mode_t view_mode) {
+              int selected, int screen_w, int screen_h, view_mode_t view_mode,
+              bool is_underwater) {
 
     bool rez = (view_mode == VIEW_REZ);
     bool synth = (view_mode == VIEW_1988);
@@ -659,13 +660,13 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
         DrawTextEx(h->font_value, b, (Vector2){x, (float)value_y}, fs_value, 0.5f, value_color);
     }
 
-    // ENERGY group: ALT, GS, AS, VS (evenly spaced)
-    // ALT
+    // ENERGY group: ALT/DEPTH, GS, AS, VS (evenly spaced)
+    // ALT / DEPTH
     {
         char b[16];
         float x = energy_start + energy_step * 0;
-        DrawTextEx(h->font_label, "ALT", (Vector2){x, (float)label_y}, fs_label, 0.5f, label_color);
-        snprintf(b, sizeof(b), "%.1f", v->altitude_rel);
+        DrawTextEx(h->font_label, is_underwater ? "DEPTH" : "ALT", (Vector2){x, (float)label_y}, fs_label, 0.5f, label_color);
+        snprintf(b, sizeof(b), "%.1f", is_underwater ? -v->altitude_rel : v->altitude_rel);
         DrawTextEx(h->font_value, b, (Vector2){x, (float)value_y}, fs_value, 0.5f, value_color);
         Vector2 vw = MeasureTextEx(h->font_value, b, fs_value, 0.5f);
         Vector2 uw = MeasureTextEx(h->font_label, "m", fs_unit, 0.5f);
@@ -801,7 +802,7 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
                            nav_start, nav_step, energy_start, energy_step,
                            h->font_label, h->font_value,
                            dim_color, value_color, warn, climb_color,
-                           secondary_h, s);
+                           secondary_h, s, is_underwater);
     }
 
     // Help overlay

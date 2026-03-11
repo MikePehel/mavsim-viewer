@@ -1,0 +1,1188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FlowView Concepts — mavsim-viewer Full UI</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500&family=Inter:wght@500&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a;
+    color: #e0e0e0;
+    font-family: 'Inter', sans-serif;
+    padding: 30px 40px;
+  }
+  h1 {
+    text-align: center;
+    font-size: 24px;
+    letter-spacing: 4px;
+    margin-bottom: 6px;
+    color: #3dffc2;
+    text-transform: uppercase;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .subtitle {
+    text-align: center;
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 40px;
+    letter-spacing: 2px;
+    font-family: 'Inter', sans-serif;
+  }
+
+  .concept {
+    margin-bottom: 50px;
+    border: 1px solid #1a1a2a;
+    border-radius: 6px;
+    overflow: hidden;
+    background: #0d0d14;
+  }
+  .concept-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 20px;
+    border-bottom: 1px solid #1a1a2a;
+    background: #08080f;
+  }
+  .concept-label h2 {
+    font-size: 15px;
+    letter-spacing: 2px;
+    color: #3dffc2;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .concept-label .tag {
+    font-size: 10px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    background: rgba(61,255,194,0.1);
+    color: #3dffc2;
+    letter-spacing: 1px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* ── VIEWPORT ── */
+  .viewport {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16/9;
+    overflow: hidden;
+  }
+
+  /* ── SHARED HUD ELEMENTS ── */
+  .hud-bar {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 120px;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 0;
+    z-index: 10;
+    border-top: 1px solid;
+  }
+  .hud-color-bar {
+    position: absolute;
+    left: 0; bottom: 0;
+    width: 3px;
+    height: 120px;
+    z-index: 11;
+  }
+
+  /* Instrument circles */
+  .instrument {
+    width: 90px;
+    height: 90px;
+    border-radius: 50%;
+    position: relative;
+    flex-shrink: 0;
+    margin: 0 6px;
+  }
+  .instrument canvas { width: 100%; height: 100%; }
+
+  /* Separator */
+  .sep {
+    width: 1px;
+    height: 70px;
+    margin: 0 14px;
+    flex-shrink: 0;
+  }
+
+  /* Telemetry group */
+  .tel-group {
+    display: flex;
+    gap: 24px;
+    flex-shrink: 0;
+  }
+  .tel-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .tel-label {
+    font-size: 11px;
+    letter-spacing: 1px;
+    font-family: 'Inter', sans-serif;
+  }
+  .tel-value {
+    font-size: 18px;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.5px;
+  }
+  .tel-unit {
+    font-size: 11px;
+    opacity: 0.5;
+    margin-left: 2px;
+    font-family: 'Inter', sans-serif;
+  }
+
+  /* Timer */
+  .timer {
+    font-size: 20px;
+    font-family: 'JetBrains Mono', monospace;
+    text-align: center;
+    margin: 0 16px;
+    flex-shrink: 0;
+  }
+  .timer-label {
+    font-size: 11px;
+    opacity: 0.4;
+    font-family: 'Inter', sans-serif;
+    letter-spacing: 1px;
+  }
+
+  /* Status */
+  .status {
+    margin-left: auto;
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+  }
+  .status-text {
+    font-size: 11px;
+    font-family: 'Inter', sans-serif;
+    letter-spacing: 0.5px;
+  }
+  .status-fps {
+    font-size: 11px;
+    font-family: 'Inter', sans-serif;
+    opacity: 0.5;
+    margin-top: 4px;
+  }
+
+  /* Debug panel */
+  .debug-panel {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 180px;
+    padding: 8px 10px;
+    border-radius: 2px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    z-index: 10;
+  }
+  .debug-panel .section-title {
+    font-size: 11px;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+    margin-top: 8px;
+  }
+  .debug-panel .section-title:first-child { margin-top: 0; }
+  .debug-panel .graph {
+    width: 100%;
+    height: 30px;
+    margin: 4px 0;
+    border-radius: 2px;
+    position: relative;
+    overflow: hidden;
+  }
+  .debug-panel .graph-line {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 60%;
+    clip-path: polygon(0% 100%, 5% 60%, 10% 70%, 15% 40%, 20% 50%, 25% 30%, 30% 35%, 35% 25%, 40% 30%, 45% 20%, 50% 25%, 55% 20%, 60% 15%, 65% 20%, 70% 15%, 75% 18%, 80% 22%, 85% 15%, 90% 20%, 95% 18%, 100% 15%);
+    opacity: 0.7;
+  }
+  .debug-panel .stat-line {
+    opacity: 0.7;
+    line-height: 1.6;
+  }
+
+  /* Vehicle silhouette */
+  .vehicle-sil {
+    position: absolute;
+    z-index: 5;
+  }
+  .vehicle-body {
+    width: 40px;
+    height: 40px;
+    position: relative;
+  }
+  /* Simple quad silhouette */
+  .vehicle-body::before {
+    content: '';
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 30px; height: 30px;
+    border-radius: 3px;
+    border: 2px solid;
+    opacity: 0.8;
+  }
+  .vehicle-body::after {
+    content: '';
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%) rotate(45deg);
+    width: 36px; height: 36px;
+    border: 1px solid;
+    opacity: 0.4;
+  }
+
+  /* Trail line */
+  .trail-line {
+    position: absolute;
+    height: 3px;
+    z-index: 4;
+    border-radius: 2px;
+    filter: blur(0.5px);
+  }
+
+  /* Ground shadow */
+  .ground-shadow {
+    position: absolute;
+    z-index: 3;
+    border-radius: 50%;
+    border: 1px solid;
+  }
+  .drop-line {
+    position: absolute;
+    width: 1px;
+    z-index: 3;
+    border-left: 2px dashed;
+  }
+
+  /* Position info */
+  .pos-info {
+    position: absolute;
+    bottom: 30px;
+    font-size: 11px;
+    opacity: 0.5;
+    font-family: 'Inter', sans-serif;
+    z-index: 11;
+  }
+
+  /* Palette bar */
+  .palette {
+    display: flex;
+    height: 30px;
+  }
+  .swatch {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.5px;
+  }
+
+  /* Notes */
+  .notes {
+    padding: 12px 20px;
+    font-size: 11px;
+    line-height: 1.8;
+    border-top: 1px solid #1a1a2a;
+    color: #888;
+  }
+  .notes strong { color: #3dffc2; }
+  .notes .color-chip {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    vertical-align: middle;
+    margin: 0 2px;
+  }
+
+  /* ════════════════════════════════════════════════════════════════════ */
+  /* CONCEPT A: TOXIC FLOW */
+  /* ════════════════════════════════════════════════════════════════════ */
+  .vp-a .sky {
+    position: absolute; inset: 0;
+    background: linear-gradient(180deg, #060810 0%, #081418 40%, #0a1e16 55%, #0c2218 65%);
+  }
+  .vp-a .ground {
+    position: absolute; bottom: 120px; left: 0; right: 0; top: 50%;
+    overflow: hidden; perspective: 600px;
+  }
+  .vp-a .ground-plane {
+    position: absolute; top: 0; left: -30%; right: -30%; height: 250%;
+    transform: rotateX(68deg); transform-origin: top center;
+  }
+  .vp-a .camo-layer {
+    position: absolute; inset: 0; opacity: 0.85;
+  }
+  .vp-a .grid-lines {
+    position: absolute; inset: 0;
+    background:
+      repeating-linear-gradient(90deg, rgba(61,255,194,0.06) 0px, rgba(61,255,194,0.06) 1px, transparent 1px, transparent 60px),
+      repeating-linear-gradient(0deg, rgba(61,255,194,0.04) 0px, rgba(61,255,194,0.04) 1px, transparent 1px, transparent 40px);
+  }
+  .vp-a .major-lines {
+    position: absolute; inset: 0;
+    background:
+      repeating-linear-gradient(90deg, rgba(61,255,194,0.14) 0px, rgba(61,255,194,0.14) 1px, transparent 1px, transparent 300px),
+      repeating-linear-gradient(0deg, rgba(61,255,194,0.10) 0px, rgba(61,255,194,0.10) 1px, transparent 1px, transparent 200px);
+  }
+  .vp-a .horizon-glow {
+    position: absolute; top: -5%; left: 0; right: 0; height: 15%;
+    background: radial-gradient(ellipse 70% 100% at 50% 100%, rgba(61,255,194,0.07) 0%, transparent 70%);
+  }
+  .vp-a .ground-fog {
+    position: absolute; bottom: 0; left: 0; right: 0; height: 40%;
+    background: linear-gradient(0deg, rgba(10,30,22,0.95) 0%, transparent 100%);
+  }
+  .vp-a .hud-bar {
+    background: rgba(6, 14, 10, 0.88);
+    border-color: rgba(61,255,194,0.25);
+  }
+  .vp-a .hud-color-bar { background: #4488ff; }
+  .vp-a .instrument {
+    background: rgba(6, 14, 10, 0.85);
+    border: 1px solid rgba(61,255,194,0.3);
+  }
+  .vp-a .sep { background: rgba(61,255,194,0.15); }
+  .vp-a .tel-label { color: rgba(61,255,194,0.55); }
+  .vp-a .tel-value { color: #c8f0e0; }
+  .vp-a .timer { color: #c8f0e0; }
+  .vp-a .timer-label { color: rgba(61,255,194,0.4); }
+  .vp-a .status-dot { background: #40cc70; }
+  .vp-a .status-text { color: #40cc70; }
+  .vp-a .status-fps { color: rgba(61,255,194,0.4); }
+  .vp-a .pos-info { color: rgba(61,255,194,0.4); left: 170px; }
+  .vp-a .vehicle-sil { top: 38%; left: 48%; }
+  .vp-a .vehicle-body::before { border-color: rgba(61,255,194,0.7); }
+  .vp-a .vehicle-body::after { border-color: rgba(61,255,194,0.3); }
+  .vp-a .trail-line {
+    top: calc(38% + 18px); left: calc(48% + 38px); width: 280px;
+    background: linear-gradient(90deg, rgba(61,255,194,0.5), rgba(40,200,120,0.3), rgba(120,80,220,0.2), transparent);
+  }
+  .vp-a .ground-shadow {
+    top: 60%; left: calc(48% - 2px); width: 44px; height: 14px;
+    background: rgba(61,255,194,0.08); border-color: rgba(61,255,194,0.25);
+  }
+  .vp-a .drop-line {
+    top: calc(38% + 38px); left: calc(48% + 18px); height: calc(60% - 38% - 32px);
+    border-color: rgba(61,255,194,0.2);
+  }
+  .vp-a .debug-panel {
+    background: rgba(6, 14, 10, 0.85);
+    border: 1px solid rgba(61,255,194,0.25);
+    color: rgba(180, 230, 210, 0.8);
+  }
+  .vp-a .debug-panel .section-title { color: rgba(61,255,194,0.8); }
+  .vp-a .debug-panel .graph { background: rgba(4, 10, 6, 0.8); }
+  .vp-a .debug-panel .graph-line { background: #40dd80; }
+
+  /* ════════════════════════════════════════════════════════════════════ */
+  /* CONCEPT B: MARBLE DRIP */
+  /* ════════════════════════════════════════════════════════════════════ */
+  .vp-b .sky {
+    position: absolute; inset: 0;
+    background: linear-gradient(180deg, #04040a 0%, #08061a 35%, #100c30 50%, #14103a 60%);
+    overflow: hidden;
+  }
+  .vp-b .sky-swirl {
+    position: absolute; inset: 0; opacity: 0.12;
+  }
+  .vp-b .ground {
+    position: absolute; bottom: 120px; left: 0; right: 0; top: 48%;
+    overflow: hidden; perspective: 550px;
+  }
+  .vp-b .ground-plane {
+    position: absolute; top: 0; left: -30%; right: -30%; height: 250%;
+    transform: rotateX(68deg); transform-origin: top center;
+  }
+  .vp-b .marble-layer {
+    position: absolute; inset: 0; opacity: 0.8;
+  }
+  .vp-b .grid-lines {
+    position: absolute; inset: 0;
+    background:
+      repeating-linear-gradient(90deg, rgba(120,80,220,0.07) 0px, rgba(120,80,220,0.07) 1px, transparent 1px, transparent 60px),
+      repeating-linear-gradient(0deg, rgba(61,255,194,0.05) 0px, rgba(61,255,194,0.05) 1px, transparent 1px, transparent 40px);
+  }
+  .vp-b .major-lines {
+    position: absolute; inset: 0;
+    background:
+      repeating-linear-gradient(90deg, rgba(120,80,220,0.16) 0px, rgba(120,80,220,0.16) 1px, transparent 1px, transparent 300px),
+      repeating-linear-gradient(0deg, rgba(61,255,194,0.12) 0px, rgba(61,255,194,0.12) 1px, transparent 1px, transparent 200px);
+  }
+  .vp-b .horizon-line {
+    position: absolute; top: 0; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent 5%, rgba(120,80,220,0.4) 30%, rgba(61,255,194,0.5) 50%, rgba(120,80,220,0.4) 70%, transparent 95%);
+    box-shadow: 0 0 15px rgba(61,255,194,0.12);
+  }
+  .vp-b .ground-fog {
+    position: absolute; bottom: 0; left: 0; right: 0; height: 35%;
+    background: linear-gradient(0deg, rgba(10,8,26,0.9) 0%, transparent 100%);
+  }
+  .vp-b .hud-bar {
+    background: rgba(8, 6, 18, 0.90);
+    border-color: rgba(120,80,220,0.3);
+  }
+  .vp-b .hud-color-bar { background: #4488ff; }
+  .vp-b .instrument {
+    background: rgba(8, 6, 18, 0.85);
+    border: 1px solid rgba(120,80,220,0.35);
+  }
+  .vp-b .sep { background: rgba(120,80,220,0.18); }
+  .vp-b .tel-label { color: rgba(120,80,220,0.6); }
+  .vp-b .tel-value { color: #d0c8e8; }
+  .vp-b .timer { color: #d0c8e8; }
+  .vp-b .timer-label { color: rgba(120,80,220,0.4); }
+  .vp-b .status-dot { background: #40cc70; }
+  .vp-b .status-text { color: #40cc70; }
+  .vp-b .status-fps { color: rgba(120,80,220,0.4); }
+  .vp-b .pos-info { color: rgba(120,80,220,0.4); left: 170px; }
+  .vp-b .vehicle-sil { top: 36%; left: 46%; }
+  .vp-b .vehicle-body::before { border-color: rgba(120,80,220,0.7); }
+  .vp-b .vehicle-body::after { border-color: rgba(120,80,220,0.3); }
+  .vp-b .trail-line {
+    top: calc(36% + 18px); left: calc(46% + 38px); width: 260px;
+    background: linear-gradient(90deg, rgba(120,80,220,0.6), rgba(61,255,194,0.35), rgba(120,80,220,0.15), transparent);
+  }
+  .vp-b .ground-shadow {
+    top: 58%; left: calc(46% - 4px); width: 48px; height: 14px;
+    background: rgba(120,80,220,0.1); border-color: rgba(120,80,220,0.3);
+  }
+  .vp-b .drop-line {
+    top: calc(36% + 38px); left: calc(46% + 18px); height: calc(58% - 36% - 32px);
+    border-color: rgba(120,80,220,0.25);
+  }
+  .vp-b .debug-panel {
+    background: rgba(8, 6, 18, 0.88);
+    border: 1px solid rgba(120,80,220,0.25);
+    color: rgba(200, 190, 230, 0.8);
+  }
+  .vp-b .debug-panel .section-title { color: rgba(120,80,220,0.8); }
+  .vp-b .debug-panel .graph { background: rgba(6, 4, 14, 0.8); }
+  .vp-b .debug-panel .graph-line { background: #7850dc; }
+
+  /* ════════════════════════════════════════════════════════════════════ */
+  /* CONCEPT C: FLOW CAMO */
+  /* ════════════════════════════════════════════════════════════════════ */
+  .vp-c .sky {
+    position: absolute; inset: 0;
+    background: linear-gradient(180deg, #030508 0%, #061210 35%, #0a1e18 50%, #0e2820 60%);
+  }
+  .vp-c .ground {
+    position: absolute; bottom: 120px; left: 0; right: 0; top: 52%;
+    overflow: hidden; perspective: 550px;
+  }
+  .vp-c .ground-plane {
+    position: absolute; top: 0; left: -30%; right: -30%; height: 250%;
+    transform: rotateX(66deg); transform-origin: top center;
+  }
+  .vp-c .camo-layer {
+    position: absolute; inset: 0; opacity: 0.85;
+  }
+  .vp-c .scanlines {
+    position: absolute; inset: 0;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,0.12) 0px, rgba(0,0,0,0.12) 1px, transparent 1px, transparent 3px);
+    opacity: 0.4;
+  }
+  .vp-c .grid-lines {
+    position: absolute; inset: 0;
+    background:
+      repeating-linear-gradient(90deg, rgba(61,255,194,0.04) 0px, rgba(61,255,194,0.04) 1px, transparent 1px, transparent 70px),
+      repeating-linear-gradient(0deg, rgba(61,255,194,0.03) 0px, rgba(61,255,194,0.03) 1px, transparent 1px, transparent 50px);
+  }
+  .vp-c .major-lines {
+    position: absolute; inset: 0;
+    background:
+      repeating-linear-gradient(90deg, rgba(61,255,194,0.08) 0px, rgba(61,255,194,0.08) 1px, transparent 1px, transparent 350px),
+      repeating-linear-gradient(0deg, rgba(61,255,194,0.06) 0px, rgba(61,255,194,0.06) 1px, transparent 1px, transparent 250px);
+  }
+  .vp-c .horizon-glow {
+    position: absolute; top: -5%; left: 0; right: 0; height: 12%;
+    background: radial-gradient(ellipse 50% 100% at 50% 100%, rgba(61,255,194,0.05) 0%, transparent 70%);
+  }
+  .vp-c .ground-fog {
+    position: absolute; bottom: 0; left: 0; right: 0; height: 45%;
+    background: linear-gradient(0deg, rgba(6,14,12,0.95) 0%, transparent 100%);
+  }
+  .vp-c .hud-bar {
+    background: rgba(6, 12, 10, 0.88);
+    border-color: rgba(61,255,194,0.2);
+  }
+  .vp-c .hud-color-bar { background: #4488ff; }
+  .vp-c .instrument {
+    background: rgba(6, 12, 10, 0.85);
+    border: 1px solid rgba(61,255,194,0.25);
+  }
+  .vp-c .sep { background: rgba(61,255,194,0.12); }
+  .vp-c .tel-label { color: rgba(61,255,194,0.5); }
+  .vp-c .tel-value { color: #b8e0d0; }
+  .vp-c .timer { color: #b8e0d0; }
+  .vp-c .timer-label { color: rgba(61,255,194,0.35); }
+  .vp-c .status-dot { background: #40cc70; }
+  .vp-c .status-text { color: #40cc70; }
+  .vp-c .status-fps { color: rgba(61,255,194,0.35); }
+  .vp-c .pos-info { color: rgba(61,255,194,0.35); left: 170px; }
+  .vp-c .vehicle-sil { top: 40%; left: 50%; }
+  .vp-c .vehicle-body::before { border-color: rgba(61,255,194,0.6); }
+  .vp-c .vehicle-body::after { border-color: rgba(61,255,194,0.25); }
+  .vp-c .trail-line {
+    top: calc(40% + 18px); left: calc(50% + 38px); width: 240px;
+    background: linear-gradient(90deg, rgba(61,255,194,0.45), rgba(30,200,100,0.25), rgba(80,180,60,0.15), transparent);
+  }
+  .vp-c .ground-shadow {
+    top: 62%; left: calc(50% - 2px); width: 44px; height: 12px;
+    background: rgba(61,255,194,0.06); border-color: rgba(61,255,194,0.2);
+  }
+  .vp-c .drop-line {
+    top: calc(40% + 38px); left: calc(50% + 18px); height: calc(62% - 40% - 32px);
+    border-color: rgba(61,255,194,0.15);
+  }
+  .vp-c .debug-panel {
+    background: rgba(6, 12, 10, 0.88);
+    border: 1px solid rgba(61,255,194,0.2);
+    color: rgba(170, 220, 200, 0.75);
+  }
+  .vp-c .debug-panel .section-title { color: rgba(61,255,194,0.7); }
+  .vp-c .debug-panel .graph { background: rgba(4, 8, 6, 0.8); }
+  .vp-c .debug-panel .graph-line { background: #30c870; }
+</style>
+</head>
+<body>
+
+<h1>FlowView Concepts</h1>
+<p class="subtitle">Drip palette + BlurFlow camo &mdash; Full UI mockups</p>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- CONCEPT A: TOXIC FLOW -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="concept">
+  <div class="concept-label">
+    <h2>A &mdash; Toxic Flow</h2>
+    <span class="tag">NEON CAMO</span>
+  </div>
+  <div class="viewport vp-a">
+    <!-- Sky -->
+    <div class="sky"></div>
+
+    <!-- Ground plane -->
+    <div class="ground">
+      <div class="ground-plane">
+        <div class="camo-layer">
+          <svg width="100%" height="100%" viewBox="0 0 1200 800" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <filter id="fA"><feTurbulence type="fractalNoise" baseFrequency="0.008 0.028" numOctaves="4" seed="7"/><feDisplacementMap in="SourceGraphic" scale="90" xChannelSelector="R" yChannelSelector="G"/></filter>
+              <filter id="bA"><feGaussianBlur stdDeviation="4"/></filter>
+            </defs>
+            <g filter="url(#fA)" opacity="0.65">
+              <rect width="1200" height="100" fill="#0e2e22"/>
+              <rect y="60" width="1200" height="180" fill="#040a08"/>
+              <rect y="200" width="1200" height="110" fill="#1a5040"/>
+              <rect y="280" width="1200" height="180" fill="#030806"/>
+              <rect y="420" width="1200" height="100" fill="#18604a"/>
+              <rect y="490" width="1200" height="140" fill="#081410"/>
+              <rect y="600" width="1200" height="100" fill="#2a7a5e"/>
+              <rect y="670" width="1200" height="130" fill="#050c0a"/>
+            </g>
+            <g filter="url(#bA)" opacity="0.22">
+              <ellipse cx="300" cy="150" rx="400" ry="14" fill="#3dffc2"/>
+              <ellipse cx="800" cy="350" rx="350" ry="10" fill="#7850dc"/>
+              <ellipse cx="500" cy="550" rx="450" ry="16" fill="#3dffc2"/>
+              <ellipse cx="200" cy="700" rx="300" ry="10" fill="#7850dc"/>
+            </g>
+          </svg>
+        </div>
+        <div class="grid-lines"></div>
+        <div class="major-lines"></div>
+        <div class="horizon-glow"></div>
+      </div>
+      <div class="ground-fog"></div>
+    </div>
+
+    <!-- Vehicle -->
+    <div class="vehicle-sil"><div class="vehicle-body"></div></div>
+    <div class="trail-line"></div>
+    <div class="ground-shadow"></div>
+    <div class="drop-line"></div>
+
+    <!-- Debug panel -->
+    <div class="debug-panel">
+      <div class="section-title">FPS</div>
+      <div style="font-size:14px; color:#50ff90">60</div>
+      <div class="graph"><div class="graph-line"></div></div>
+      <div class="stat-line">min 58  max 62</div>
+      <div class="section-title">FRAME TIME</div>
+      <div style="font-size:12px; color:#50ff90">16.6 ms</div>
+      <div class="graph"><div class="graph-line"></div></div>
+      <div class="stat-line">peak 17.2 ms</div>
+      <div class="section-title">RENDER</div>
+      <div class="stat-line">Vehicles    1 / 1</div>
+      <div class="stat-line">Trail pts   842</div>
+      <div class="section-title">MEMORY</div>
+      <div class="stat-line">Trails      46 KB</div>
+      <div class="stat-line" style="color:rgba(61,255,194,0.7)">Est total   ~6 MB</div>
+    </div>
+
+    <!-- HUD bar -->
+    <div class="hud-color-bar"></div>
+    <div class="hud-bar">
+      <!-- Compass -->
+      <div class="instrument">
+        <canvas id="compass-a" width="90" height="90"></canvas>
+      </div>
+      <!-- ADI -->
+      <div class="instrument">
+        <canvas id="adi-a" width="90" height="90"></canvas>
+      </div>
+
+      <div class="sep"></div>
+
+      <!-- NAV group -->
+      <div class="tel-group">
+        <div class="tel-item">
+          <span class="tel-label">HDG</span>
+          <span class="tel-value">045<span class="tel-unit">deg</span></span>
+        </div>
+        <div class="tel-item">
+          <span class="tel-label">ROLL</span>
+          <span class="tel-value">+12</span>
+        </div>
+        <div class="tel-item">
+          <span class="tel-label">PITCH</span>
+          <span class="tel-value">-3</span>
+        </div>
+      </div>
+
+      <div class="sep"></div>
+
+      <!-- ENERGY group -->
+      <div class="tel-group">
+        <div class="tel-item">
+          <span class="tel-label">ALT</span>
+          <span class="tel-value">42.0<span class="tel-unit">m</span></span>
+        </div>
+        <div class="tel-item">
+          <span class="tel-label">GS</span>
+          <span class="tel-value">12.5<span class="tel-unit">m/s</span></span>
+        </div>
+        <div class="tel-item">
+          <span class="tel-label">AS</span>
+          <span class="tel-value">11.8<span class="tel-unit">m/s</span></span>
+        </div>
+        <div class="tel-item">
+          <span class="tel-label">VS</span>
+          <span class="tel-value" style="color:#50ff90">+1.2^<span class="tel-unit">m/s</span></span>
+        </div>
+      </div>
+
+      <div class="sep"></div>
+
+      <!-- Timer -->
+      <div class="timer">
+        <div>03:42</div>
+        <div class="timer-label">SIM</div>
+      </div>
+
+      <!-- Status -->
+      <div class="status">
+        <div><span class="status-dot"></span><span class="status-text">MAVLink SYS 1</span></div>
+        <div class="status-fps">FPS: 60</div>
+      </div>
+    </div>
+    <div class="pos-info">Pos: 34.2, 42.0, -18.7</div>
+  </div>
+
+  <div class="palette">
+    <div class="swatch" style="background:#3dffc2; color:#000">#3DFFC2 mint</div>
+    <div class="swatch" style="background:#1a5040; color:#aaa">#1A5040 mid green</div>
+    <div class="swatch" style="background:#0a1e16; color:#666">#0A1E16 dark green</div>
+    <div class="swatch" style="background:#040a08; color:#444">#040A08 void</div>
+    <div class="swatch" style="background:#7850dc; color:#ddd">#7850DC purple</div>
+    <div class="swatch" style="background:#0c2218; color:#555">#0C2218 fog</div>
+  </div>
+
+  <div class="notes">
+    <strong>Ground:</strong> Dark base with flowing mint-green camo streaks + purple veins. Terrain tiles tinted deep emerald.<br>
+    <strong>Sky:</strong> Near-black → dark teal at horizon. Faint <span class="color-chip" style="background:#3dffc2"></span> glow at horizon line.<br>
+    <strong>Grid:</strong> Dim mint lines — camo texture dominates. Major lines slightly brighter.<br>
+    <strong>HUD:</strong> <span class="color-chip" style="background:rgba(61,255,194,0.55)"></span> Mint labels, light green-grey values. Dark green glass background.<br>
+    <strong>Trail:</strong> Mint → green → purple directional gradient. Ground shadow mint-tinted.<br>
+    <strong>Debug:</strong> Mint accent, green FPS graphs on dark green background.<br>
+    <strong>Vibe:</strong> Tactical night-vision / toxic swamp. High contrast between black voids and neon flow.
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- CONCEPT B: MARBLE DRIP -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="concept">
+  <div class="concept-label">
+    <h2>B &mdash; Marble Drip</h2>
+    <span class="tag">SWIRL MARBLE</span>
+  </div>
+  <div class="viewport vp-b">
+    <!-- Sky -->
+    <div class="sky">
+      <div class="sky-swirl">
+        <svg width="100%" height="100%" viewBox="0 0 1200 500" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <filter id="skB"><feTurbulence type="turbulence" baseFrequency="0.004 0.010" numOctaves="3" seed="42"/><feDisplacementMap in="SourceGraphic" scale="50"/></filter>
+          </defs>
+          <g filter="url(#skB)" opacity="0.4">
+            <rect width="1200" height="500" fill="#14103a"/>
+            <ellipse cx="400" cy="200" rx="500" ry="120" fill="#1a1050" opacity="0.6"/>
+            <ellipse cx="800" cy="350" rx="300" ry="80" fill="#200e60" opacity="0.5"/>
+          </g>
+        </svg>
+      </div>
+    </div>
+
+    <!-- Ground plane -->
+    <div class="ground">
+      <div class="ground-plane">
+        <div class="marble-layer">
+          <svg width="100%" height="100%" viewBox="0 0 1200 900" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <filter id="fB"><feTurbulence type="turbulence" baseFrequency="0.006 0.020" numOctaves="5" seed="13"/><feDisplacementMap in="SourceGraphic" scale="100" xChannelSelector="R" yChannelSelector="G"/></filter>
+              <filter id="bB"><feGaussianBlur stdDeviation="4"/></filter>
+            </defs>
+            <g filter="url(#fB)" opacity="0.7">
+              <rect y="0" width="1200" height="130" fill="#12103a"/>
+              <rect y="100" width="1200" height="180" fill="#0a0820"/>
+              <rect y="240" width="1200" height="120" fill="#1e1860"/>
+              <rect y="330" width="1200" height="170" fill="#080614"/>
+              <rect y="460" width="1200" height="130" fill="#18144a"/>
+              <rect y="560" width="1200" height="120" fill="#0c0a20"/>
+              <rect y="650" width="1200" height="140" fill="#201a6a"/>
+              <rect y="760" width="1200" height="140" fill="#0a0818"/>
+            </g>
+            <g filter="url(#bB)" opacity="0.3">
+              <path d="M0,100 Q300,75 600,115 T1200,85" stroke="#3dffc2" stroke-width="7" fill="none"/>
+              <path d="M0,300 Q400,260 700,310 T1200,270" stroke="#3dffc2" stroke-width="5" fill="none"/>
+              <path d="M0,500 Q250,475 550,515 T1200,485" stroke="#7850dc" stroke-width="9" fill="none"/>
+              <path d="M0,700 Q350,670 650,710 T1200,680" stroke="#3dffc2" stroke-width="4" fill="none"/>
+            </g>
+          </svg>
+        </div>
+        <div class="grid-lines"></div>
+        <div class="major-lines"></div>
+        <div class="horizon-line"></div>
+      </div>
+      <div class="ground-fog"></div>
+    </div>
+
+    <!-- Vehicle -->
+    <div class="vehicle-sil"><div class="vehicle-body"></div></div>
+    <div class="trail-line"></div>
+    <div class="ground-shadow"></div>
+    <div class="drop-line"></div>
+
+    <!-- Debug panel -->
+    <div class="debug-panel">
+      <div class="section-title">FPS</div>
+      <div style="font-size:14px; color:#50ff90">60</div>
+      <div class="graph"><div class="graph-line"></div></div>
+      <div class="stat-line">min 57  max 61</div>
+      <div class="section-title">FRAME TIME</div>
+      <div style="font-size:12px; color:#50ff90">16.7 ms</div>
+      <div class="graph"><div class="graph-line"></div></div>
+      <div class="stat-line">peak 17.8 ms</div>
+      <div class="section-title">RENDER</div>
+      <div class="stat-line">Vehicles    1 / 1</div>
+      <div class="stat-line">Trail pts   842</div>
+      <div class="section-title">MEMORY</div>
+      <div class="stat-line">Trails      46 KB</div>
+      <div class="stat-line" style="color:rgba(120,80,220,0.7)">Est total   ~6 MB</div>
+    </div>
+
+    <!-- HUD bar -->
+    <div class="hud-color-bar"></div>
+    <div class="hud-bar">
+      <div class="instrument">
+        <canvas id="compass-b" width="90" height="90"></canvas>
+      </div>
+      <div class="instrument">
+        <canvas id="adi-b" width="90" height="90"></canvas>
+      </div>
+
+      <div class="sep"></div>
+
+      <div class="tel-group">
+        <div class="tel-item">
+          <span class="tel-label">HDG</span>
+          <span class="tel-value">045<span class="tel-unit">deg</span></span>
+        </div>
+        <div class="tel-item">
+          <span class="tel-label">ROLL</span>
+          <span class="tel-value">+12</span>
+        </div>
+        <div class="tel-item">
+          <span class="tel-label">PITCH</span>
+          <span class="tel-value">-3</span>
+        </div>
+      </div>
+
+      <div class="sep"></div>
+
+      <div class="tel-group">
+        <div class="tel-item">
+          <span class="tel-label">ALT</span>
+          <span class="tel-value">42.0<span class="tel-unit">m</span></span>
+        </div>
+        <div class="tel-item">
+          <span class="tel-label">GS</span>
+          <span class="tel-value">12.5<span class="tel-unit">m/s</span></span>
+        </div>
+        <div class="tel-item">
+          <span class="tel-label">AS</span>
+          <span class="tel-value">11.8<span class="tel-unit">m/s</span></span>
+        </div>
+        <div class="tel-item">
+          <span class="tel-label">VS</span>
+          <span class="tel-value" style="color:#50ff90">+1.2^<span class="tel-unit">m/s</span></span>
+        </div>
+      </div>
+
+      <div class="sep"></div>
+
+      <div class="timer">
+        <div>03:42</div>
+        <div class="timer-label">SIM</div>
+      </div>
+
+      <div class="status">
+        <div><span class="status-dot"></span><span class="status-text">MAVLink SYS 1</span></div>
+        <div class="status-fps">FPS: 60</div>
+      </div>
+    </div>
+    <div class="pos-info">Pos: 34.2, 42.0, -18.7</div>
+  </div>
+
+  <div class="palette">
+    <div class="swatch" style="background:#3dffc2; color:#000">#3DFFC2 mint</div>
+    <div class="swatch" style="background:#7850dc; color:#ddd">#7850DC purple</div>
+    <div class="swatch" style="background:#1e1860; color:#888">#1E1860 deep indigo</div>
+    <div class="swatch" style="background:#0a0820; color:#555">#0A0820 void</div>
+    <div class="swatch" style="background:#14103a; color:#666">#14103A sky</div>
+    <div class="swatch" style="background:#080614; color:#444">#080614 fog</div>
+  </div>
+
+  <div class="notes">
+    <strong>Ground:</strong> Deep indigo-purple marble with swirling <span class="color-chip" style="background:#3dffc2"></span> mint + <span class="color-chip" style="background:#7850dc"></span> violet veins. Drip background marble feel.<br>
+    <strong>Sky:</strong> Dark purple-black with subtle turbulence clouds. Faint purple swirl.<br>
+    <strong>Grid:</strong> Purple verticals, mint horizontals — dual-tone grid.<br>
+    <strong>HUD:</strong> <span class="color-chip" style="background:rgba(120,80,220,0.6)"></span> Purple labels, light lavender values. Deep indigo glass background.<br>
+    <strong>Trail:</strong> Purple → mint → purple. More saturated and psychedelic.<br>
+    <strong>Debug:</strong> Purple accent, graphs on near-black indigo.<br>
+    <strong>Vibe:</strong> Liquid marble / drip art. Ground feels like polished stone with flowing pigment.
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- CONCEPT C: FLOW CAMO -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="concept">
+  <div class="concept-label">
+    <h2>C &mdash; Flow Camo</h2>
+    <span class="tag">FLUID CAMO</span>
+  </div>
+  <div class="viewport vp-c">
+    <!-- Sky -->
+    <div class="sky"></div>
+
+    <!-- Ground plane -->
+    <div class="ground">
+      <div class="ground-plane">
+        <div class="camo-layer">
+          <svg width="100%" height="100%" viewBox="0 0 1200 900" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <filter id="fC"><feTurbulence type="fractalNoise" baseFrequency="0.012 0.038" numOctaves="4" seed="31"/><feDisplacementMap in="SourceGraphic" scale="75" xChannelSelector="R" yChannelSelector="G"/></filter>
+              <filter id="bC"><feGaussianBlur stdDeviation="5"/></filter>
+            </defs>
+            <g filter="url(#fC)" opacity="0.8">
+              <rect y="0" width="1200" height="100" fill="#060e0c"/>
+              <rect y="60" width="1200" height="130" fill="#143828"/>
+              <rect y="120" width="1200" height="55" fill="#1e5a40"/>
+              <rect y="160" width="1200" height="130" fill="#040a08"/>
+              <rect y="270" width="1200" height="120" fill="#0e3020"/>
+              <rect y="340" width="1200" height="45" fill="#1e5a40"/>
+              <rect y="370" width="1200" height="110" fill="#060e0c"/>
+              <rect y="460" width="1200" height="110" fill="#143828"/>
+              <rect y="530" width="1200" height="40" fill="#225e44"/>
+              <rect y="550" width="1200" height="130" fill="#040a08"/>
+              <rect y="660" width="1200" height="100" fill="#0e3020"/>
+              <rect y="720" width="1200" height="55" fill="#1e5a40"/>
+              <rect y="760" width="1200" height="140" fill="#060e0c"/>
+            </g>
+            <g filter="url(#bC)" opacity="0.18">
+              <ellipse cx="350" cy="120" rx="300" ry="16" fill="#8a7a50"/>
+              <ellipse cx="900" cy="380" rx="250" ry="12" fill="#7a6a44"/>
+              <ellipse cx="500" cy="600" rx="350" ry="14" fill="#8a7a50"/>
+              <ellipse cx="150" cy="800" rx="200" ry="10" fill="#7a6a44"/>
+            </g>
+            <g filter="url(#bC)" opacity="0.12">
+              <ellipse cx="600" cy="200" rx="500" ry="5" fill="#3dffc2"/>
+              <ellipse cx="400" cy="450" rx="400" ry="4" fill="#3dffc2"/>
+              <ellipse cx="700" cy="680" rx="350" ry="4" fill="#3dffc2"/>
+            </g>
+          </svg>
+        </div>
+        <div class="scanlines"></div>
+        <div class="grid-lines"></div>
+        <div class="major-lines"></div>
+        <div class="horizon-glow"></div>
+      </div>
+      <div class="ground-fog"></div>
+    </div>
+
+    <!-- Vehicle -->
+    <div class="vehicle-sil"><div class="vehicle-body"></div></div>
+    <div class="trail-line"></div>
+    <div class="ground-shadow"></div>
+    <div class="drop-line"></div>
+
+    <!-- Debug panel -->
+    <div class="debug-panel">
+      <div class="section-title">FPS</div>
+      <div style="font-size:14px; color:#50ff90">60</div>
+      <div class="graph"><div class="graph-line"></div></div>
+      <div class="stat-line">min 58  max 61</div>
+      <div class="section-title">FRAME TIME</div>
+      <div style="font-size:12px; color:#50ff90">16.6 ms</div>
+      <div class="graph"><div class="graph-line"></div></div>
+      <div class="stat-line">peak 17.1 ms</div>
+      <div class="section-title">RENDER</div>
+      <div class="stat-line">Vehicles    1 / 1</div>
+      <div class="stat-line">Trail pts   842</div>
+      <div class="section-title">MEMORY</div>
+      <div class="stat-line">Trails      46 KB</div>
+      <div class="stat-line" style="color:rgba(61,255,194,0.6)">Est total   ~6 MB</div>
+    </div>
+
+    <!-- HUD bar -->
+    <div class="hud-color-bar"></div>
+    <div class="hud-bar">
+      <div class="instrument">
+        <canvas id="compass-c" width="90" height="90"></canvas>
+      </div>
+      <div class="instrument">
+        <canvas id="adi-c" width="90" height="90"></canvas>
+      </div>
+
+      <div class="sep"></div>
+
+      <div class="tel-group">
+        <div class="tel-item">
+          <span class="tel-label">HDG</span>
+          <span class="tel-value">045<span class="tel-unit">deg</span></span>
+        </div>
+        <div class="tel-item">
+          <span class="tel-label">ROLL</span>
+          <span class="tel-value">+12</span>
+        </div>
+        <div class="tel-item">
+          <span class="tel-label">PITCH</span>
+          <span class="tel-value">-3</span>
+        </div>
+      </div>
+
+      <div class="sep"></div>
+
+      <div class="tel-group">
+        <div class="tel-item">
+          <span class="tel-label">ALT</span>
+          <span class="tel-value">42.0<span class="tel-unit">m</span></span>
+        </div>
+        <div class="tel-item">
+          <span class="tel-label">GS</span>
+          <span class="tel-value">12.5<span class="tel-unit">m/s</span></span>
+        </div>
+        <div class="tel-item">
+          <span class="tel-label">AS</span>
+          <span class="tel-value">11.8<span class="tel-unit">m/s</span></span>
+        </div>
+        <div class="tel-item">
+          <span class="tel-label">VS</span>
+          <span class="tel-value" style="color:#50ff90">+1.2^<span class="tel-unit">m/s</span></span>
+        </div>
+      </div>
+
+      <div class="sep"></div>
+
+      <div class="timer">
+        <div>03:42</div>
+        <div class="timer-label">SIM</div>
+      </div>
+
+      <div class="status">
+        <div><span class="status-dot"></span><span class="status-text">MAVLink SYS 1</span></div>
+        <div class="status-fps">FPS: 60</div>
+      </div>
+    </div>
+    <div class="pos-info">Pos: 34.2, 42.0, -18.7</div>
+  </div>
+
+  <div class="palette">
+    <div class="swatch" style="background:#3dffc2; color:#000">#3DFFC2 mint</div>
+    <div class="swatch" style="background:#1e5a40; color:#ccc">#1E5A40 bright camo</div>
+    <div class="swatch" style="background:#143828; color:#888">#143828 mid camo</div>
+    <div class="swatch" style="background:#060e0c; color:#555">#060E0C dark camo</div>
+    <div class="swatch" style="background:#8a7a50; color:#222">#8A7A50 khaki</div>
+    <div class="swatch" style="background:#040a08; color:#444">#040A08 void</div>
+  </div>
+
+  <div class="notes">
+    <strong>Ground:</strong> True BlurFlow camo recolored — dark/mid/bright green flowing bands + <span class="color-chip" style="background:#8a7a50"></span> tan/khaki streaks + faint <span class="color-chip" style="background:#3dffc2"></span> neon edges.<br>
+    <strong>Sky:</strong> Near-black → subtle teal-green at horizon. Minimal sky presence.<br>
+    <strong>Grid:</strong> Ghost-faint mint lines. Scanline overlay adds CRT texture. Camo dominates.<br>
+    <strong>HUD:</strong> <span class="color-chip" style="background:rgba(61,255,194,0.5)"></span> Subtle mint labels, muted green-grey values. Dark camo glass background.<br>
+    <strong>Trail:</strong> Mint → green → olive gradient. Understated, tactical.<br>
+    <strong>Debug:</strong> Muted mint accent, green graphs. Most subdued of the three.<br>
+    <strong>Vibe:</strong> Military fluid camo meets cyberpunk. Closest to original BlurFlow with neon shift. Scanlines add digital texture.
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- CANVAS INSTRUMENTS -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<script>
+function drawCompass(id, accent, bg, north) {
+  const c = document.getElementById(id);
+  if (!c) return;
+  const ctx = c.getContext('2d');
+  const w = 90, cx = 45, cy = 45, r = 40;
+  c.width = w; c.height = w;
+
+  // Background
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
+  ctx.fillStyle = bg; ctx.fill();
+  ctx.strokeStyle = accent; ctx.lineWidth = 1; ctx.stroke();
+
+  const heading = 45; // degrees
+
+  // Tick marks
+  for (let deg = 0; deg < 360; deg += 10) {
+    const angle = (deg - heading) * Math.PI/180 - Math.PI/2;
+    const isMajor = deg % 30 === 0;
+    const inner = isMajor ? r * 0.7 : r * 0.82;
+    const outer = r * 0.92;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner);
+    ctx.lineTo(cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer);
+    ctx.strokeStyle = accent;
+    ctx.globalAlpha = isMajor ? 1 : 0.5;
+    ctx.lineWidth = isMajor ? 1.5 : 0.8;
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  // Cardinal labels
+  const labels = ['N','E','S','W'];
+  const labelDegs = [0, 90, 180, 270];
+  ctx.font = '10px JetBrains Mono, monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (let i = 0; i < 4; i++) {
+    const angle = (labelDegs[i] - heading) * Math.PI/180 - Math.PI/2;
+    const lr = r * 0.52;
+    ctx.fillStyle = i === 0 ? north : accent;
+    ctx.fillText(labels[i], cx + Math.cos(angle)*lr, cy + Math.sin(angle)*lr);
+  }
+
+  // Heading text
+  ctx.fillStyle = accent;
+  ctx.fillText('045', cx, cy + r * 0.65);
+
+  // North pointer triangle
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - r - 2);
+  ctx.lineTo(cx + 4, cy - r + 5);
+  ctx.lineTo(cx - 4, cy - r + 5);
+  ctx.fillStyle = north; ctx.fill();
+}
+
+function drawADI(id, accent, skyCol, gndCol, wingCol) {
+  const c = document.getElementById(id);
+  if (!c) return;
+  const ctx = c.getContext('2d');
+  const w = 90, cx = 45, cy = 45, r = 40;
+  c.width = w; c.height = w;
+
+  // Background
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
+  ctx.fillStyle = skyCol; ctx.fill();
+
+  // Ground half (tilted for roll)
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(-12 * Math.PI/180); // roll
+  ctx.beginPath();
+  ctx.rect(-r-5, 3, (r+5)*2, r+5); // offset for pitch
+  ctx.fillStyle = gndCol; ctx.fill();
+
+  // Horizon line
+  ctx.beginPath();
+  ctx.moveTo(-r, 3); ctx.lineTo(r, 3);
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 1.5; ctx.stroke();
+
+  // Pitch bars
+  ctx.strokeStyle = accent; ctx.lineWidth = 0.8; ctx.globalAlpha = 0.5;
+  for (const py of [-12, -6, 6, 12]) {
+    ctx.beginPath();
+    ctx.moveTo(-10, 3 + py); ctx.lineTo(10, 3 + py);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  // Wing markers
+  ctx.strokeStyle = wingCol; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(cx - 20, cy); ctx.lineTo(cx - 8, cy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx + 8, cy); ctx.lineTo(cx + 20, cy); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI*2); ctx.fillStyle = wingCol; ctx.fill();
+
+  // Border
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
+  ctx.strokeStyle = accent; ctx.lineWidth = 1; ctx.stroke();
+
+  // Roll triangle
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - r + 1);
+  ctx.lineTo(cx + 3, cy - r + 6);
+  ctx.lineTo(cx - 3, cy - r + 6);
+  ctx.fillStyle = accent; ctx.fill();
+}
+
+// Concept A: Toxic Flow
+drawCompass('compass-a', 'rgba(61,255,194,0.7)', 'rgba(6,14,10,0.9)', '#ff4040');
+drawADI('adi-a', 'rgba(61,255,194,0.5)', 'rgba(10,40,30,0.8)', 'rgba(30,80,50,0.8)', '#40dd80');
+
+// Concept B: Marble Drip
+drawCompass('compass-b', 'rgba(120,80,220,0.7)', 'rgba(8,6,18,0.9)', '#ff4040');
+drawADI('adi-b', 'rgba(120,80,220,0.5)', 'rgba(15,10,40,0.8)', 'rgba(40,25,80,0.8)', '#3dffc2');
+
+// Concept C: Flow Camo
+drawCompass('compass-c', 'rgba(61,255,194,0.6)', 'rgba(6,12,10,0.9)', '#ff4040');
+drawADI('adi-c', 'rgba(61,255,194,0.45)', 'rgba(8,30,22,0.8)', 'rgba(25,60,40,0.8)', '#40cc70');
+</script>
+
+</body>
+</html>

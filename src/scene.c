@@ -45,6 +45,88 @@
 #define SYNTH_AXIS_X   (Color){ 255, 20, 100, 220 }   // hot pink, full
 #define SYNTH_AXIS_Z   (Color){ 255, 20, 100, 220 }   // hot pink, full
 
+// Underwater mode colors (per view mode)
+// Grid underwater — mid-depth open water
+#define UW_GRID_SKY     (Color){  8,  24,  40, 255 }
+#define UW_GRID_GROUND  (Color){ 10,  30,  45, 255 }
+#define UW_GRID_CAUSTIC (Color){ 96, 216, 192, 128 }  // repurposed as colMinor
+#define UW_GRID_FOG     (Color){ 14,  48,  64, 255 }
+
+// Rez underwater — bioluminescent abyss
+#define UW_REZ_SKY      (Color){  2,   4,   6, 255 }
+#define UW_REZ_GROUND   (Color){  3,   5,   8, 255 }
+#define UW_REZ_CAUSTIC  (Color){ 48, 232, 176,  40 }
+#define UW_REZ_FOG      (Color){  2,   4,   8, 255 }
+
+// Snow underwater — tropical shallows
+#define UW_SNOW_SKY     (Color){ 88, 208, 224, 255 }
+#define UW_SNOW_GROUND  (Color){ 60, 160, 180, 255 }
+#define UW_SNOW_CAUSTIC (Color){160, 232, 224, 200 }
+#define UW_SNOW_FOG     (Color){ 40, 140, 160, 255 }
+
+// 1988 underwater — neon reef
+#define UW_SYNTH_SKY    (Color){  6,   3,  16, 255 }
+#define UW_SYNTH_GROUND (Color){  8,   4,  20, 255 }
+#define UW_SYNTH_CAUSTIC (Color){255, 32, 128,  80 }
+#define UW_SYNTH_FOG    (Color){  6,   4,  16, 255 }
+
+// Edge ring system
+#define EDGE_RING_MAX 12
+
+typedef struct {
+    float x, y;           // screen position
+    float radius;         // 20-80px
+    float dx, dy;         // drift velocity
+    float life;           // current time
+    float life_max;       // total lifetime
+    float thickness;      // 1.0-2.0px
+    bool active;
+} edge_ring_t;
+
+static edge_ring_t s_edge_rings[EDGE_RING_MAX];
+static bool s_edge_rings_inited = false;
+
+static float randf(void) {
+    return (float)(rand() % 10000) / 10000.0f;
+}
+
+static void edge_ring_spawn(edge_ring_t *r, int screen_w, int screen_h) {
+    r->radius = 20.0f + randf() * 60.0f;
+    r->life = 0.0f;
+    r->life_max = 4.0f + randf() * 4.0f;
+    r->thickness = 1.0f + randf() * 1.0f;
+    r->active = true;
+
+    // Pick random edge
+    int edge = rand() % 4;
+    switch (edge) {
+        case 0: // top
+            r->x = randf() * screen_w;
+            r->y = -r->radius * 0.5f;
+            r->dx = (randf() - 0.5f) * 8.0f;
+            r->dy = 5.0f + randf() * 10.0f;
+            break;
+        case 1: // bottom
+            r->x = randf() * screen_w;
+            r->y = screen_h + r->radius * 0.5f;
+            r->dx = (randf() - 0.5f) * 8.0f;
+            r->dy = -(5.0f + randf() * 10.0f);
+            break;
+        case 2: // left
+            r->x = -r->radius * 0.5f;
+            r->y = randf() * screen_h;
+            r->dx = 5.0f + randf() * 10.0f;
+            r->dy = (randf() - 0.5f) * 8.0f;
+            break;
+        case 3: // right
+            r->x = screen_w + r->radius * 0.5f;
+            r->y = randf() * screen_h;
+            r->dx = -(5.0f + randf() * 10.0f);
+            r->dy = (randf() - 0.5f) * 8.0f;
+            break;
+    }
+}
+
 // 1988 mountain settings
 #define MTN_COLOR      (Color){ 1, 156, 227, 255 }    // #019CE3 teal
 #define MTN_COLS       40       // subdivisions along edge
@@ -385,6 +467,8 @@ void scene_init(scene_t *s) {
     s->loc_groundTex  = GetShaderLocation(s->grid_shader, "groundTex");
     s->loc_colFog     = GetShaderLocation(s->grid_shader, "colFog");
     s->loc_colTint    = GetShaderLocation(s->grid_shader, "colTint");
+    s->loc_isUnderwater = GetShaderLocation(s->grid_shader, "isUnderwater");
+    s->loc_time       = GetShaderLocation(s->grid_shader, "uTime");
 
     // Load terrain texture from pre-baked PNG
     double t0 = GetTime();
@@ -607,6 +691,11 @@ void scene_handle_input(scene_t *s) {
         printf("Terrain: %s\n", s->ground_tex_on ? "ON" : "OFF");
     }
 
+    if (IsKeyPressed(KEY_U)) {
+        s->is_underwater = !s->is_underwater;
+        printf("Underwater: %s\n", s->is_underwater ? "ON" : "OFF");
+    }
+
     if (IsKeyPressed(KEY_V)) {
         // If in hidden mode, return to Grid; otherwise cycle public modes
         if (s->view_mode >= VIEW_COUNT)
@@ -719,11 +808,20 @@ static void draw_shader_grid(const scene_t *s,
         SetShaderValue(s->grid_shader, s->loc_groundTex, (int[]){1}, SHADER_UNIFORM_INT);
     }
 
+    // Underwater uniforms
+    int uw = s->is_underwater ? 1 : 0;
+    SetShaderValue(s->grid_shader, s->loc_isUnderwater, &uw, SHADER_UNIFORM_INT);
+    float t = (float)GetTime();
+    SetShaderValue(s->grid_shader, s->loc_time, &t, SHADER_UNIFORM_FLOAT);
+
     // Pass identity model matrix (plane is at origin)
     Matrix model = MatrixIdentity();
     SetShaderValueMatrix(s->grid_shader, s->loc_matModel, model);
 
+    // Double-sided surface when underwater (visible from below)
+    if (s->is_underwater) rlDisableBackfaceCulling();
     DrawModel(s->grid_plane, (Vector3){0, 0, 0}, 1.0f, WHITE);
+    if (s->is_underwater) rlEnableBackfaceCulling();
 
     if (texOn) {
         rlActiveTextureSlot(1);
@@ -733,7 +831,26 @@ static void draw_shader_grid(const scene_t *s,
 }
 
 void scene_draw(const scene_t *s) {
-    if (s->view_mode == VIEW_GRID) {
+    if (s->is_underwater) {
+        // Underwater: caustic surface, no grid lines (colMinor repurposed as caustic color)
+        if (s->view_mode == VIEW_GRID) {
+            draw_shader_grid(s, UW_GRID_GROUND, UW_GRID_CAUSTIC, UW_GRID_CAUSTIC, UW_GRID_CAUSTIC, UW_GRID_CAUSTIC,
+                UW_GRID_FOG, UW_GRID_GROUND);
+        } else if (s->view_mode == VIEW_REZ) {
+            draw_shader_grid(s, UW_REZ_GROUND, UW_REZ_CAUSTIC, UW_REZ_CAUSTIC, UW_REZ_CAUSTIC, UW_REZ_CAUSTIC,
+                UW_REZ_FOG, UW_REZ_GROUND);
+        } else if (s->view_mode == VIEW_SNOW) {
+            draw_shader_grid(s, UW_SNOW_GROUND, UW_SNOW_CAUSTIC, UW_SNOW_CAUSTIC, UW_SNOW_CAUSTIC, UW_SNOW_CAUSTIC,
+                UW_SNOW_FOG, UW_SNOW_GROUND);
+        } else if (s->view_mode == VIEW_1988) {
+            draw_shader_grid(s, UW_SYNTH_GROUND, UW_SYNTH_CAUSTIC, UW_SYNTH_CAUSTIC, UW_SYNTH_CAUSTIC, UW_SYNTH_CAUSTIC,
+                UW_SYNTH_FOG, UW_SYNTH_GROUND);
+            // Wireframe coral (same geometry as mountains, just different colors via 1988 mode)
+            rlDisableBackfaceCulling();
+            DrawModel(s->mountains, (Vector3){0, 0, 0}, 1.0f, WHITE);
+            rlEnableBackfaceCulling();
+        }
+    } else if (s->view_mode == VIEW_GRID) {
         draw_shader_grid(s, GRID_GROUND, GRID_MINOR, GRID_MAJOR, GRID_AXIS_X, GRID_AXIS_Z,
             (Color){ 30, 34, 28, 255 }, (Color){ 42, 38, 32, 255 });
     } else if (s->view_mode == VIEW_REZ) {
@@ -840,12 +957,73 @@ void scene_draw_ortho_ground(const scene_t *s, int screen_w, int screen_h) {
 }
 
 void scene_draw_sky(const scene_t *s) {
+    if (s->is_underwater) {
+        switch (s->view_mode) {
+            case VIEW_GRID: ClearBackground(UW_GRID_SKY); break;
+            case VIEW_REZ:  ClearBackground(UW_REZ_SKY); break;
+            case VIEW_SNOW: ClearBackground(UW_SNOW_SKY); break;
+            case VIEW_1988: ClearBackground(UW_SYNTH_SKY); break;
+            default:        ClearBackground(UW_GRID_SKY); break;
+        }
+    } else {
+        switch (s->view_mode) {
+            case VIEW_GRID: ClearBackground(GRID_SKY); break;
+            case VIEW_REZ:  ClearBackground(REZ_SKY);   break;
+            case VIEW_SNOW: ClearBackground(SNOW_SKY); break;
+            case VIEW_1988: ClearBackground(SYNTH_SKY); break;
+            default:        ClearBackground(GRID_SKY); break;
+        }
+    }
+}
+
+void scene_draw_underwater_overlay(scene_t *s, int screen_w, int screen_h) {
+    if (!s->is_underwater) return;
+
+    float dt = GetFrameTime();
+
+    // Initialize edge rings on first call
+    if (!s_edge_rings_inited) {
+        for (int i = 0; i < EDGE_RING_MAX; i++) {
+            s_edge_rings[i].active = false;
+            // Stagger initial spawns
+            edge_ring_spawn(&s_edge_rings[i], screen_w, screen_h);
+            s_edge_rings[i].life = randf() * s_edge_rings[i].life_max;
+        }
+        s_edge_rings_inited = true;
+    }
+
+    // Pick accent color based on view mode
+    Color accent;
     switch (s->view_mode) {
-        case VIEW_GRID: ClearBackground(GRID_SKY); break;
-        case VIEW_REZ:  ClearBackground(REZ_SKY);   break;
-        case VIEW_SNOW: ClearBackground(SNOW_SKY); break;
-        case VIEW_1988: ClearBackground(SYNTH_SKY); break;
-        default:        ClearBackground(GRID_SKY); break;
+        case VIEW_REZ:  accent = (Color){ 48, 232, 176, 255 }; break;
+        case VIEW_SNOW: accent = (Color){ 16, 144, 160, 255 }; break;
+        case VIEW_1988: accent = (Color){ 255, 32, 128, 255 }; break;
+        default:        accent = (Color){ 64, 184, 208, 255 }; break;
+    }
+
+    for (int i = 0; i < EDGE_RING_MAX; i++) {
+        edge_ring_t *r = &s_edge_rings[i];
+
+        r->life += dt;
+        if (r->life >= r->life_max) {
+            edge_ring_spawn(r, screen_w, screen_h);
+            continue;
+        }
+
+        r->x += r->dx * dt;
+        r->y += r->dy * dt;
+
+        // Alpha: fade in 15%, hold, fade out 20%
+        float t = r->life / r->life_max;
+        float alpha;
+        if (t < 0.15f) alpha = t / 0.15f;
+        else if (t > 0.8f) alpha = (1.0f - t) / 0.2f;
+        else alpha = 1.0f;
+        alpha *= 0.1f;  // max opacity ~10%
+
+        Color ring_color = (Color){ accent.r, accent.g, accent.b, (unsigned char)(alpha * 255) };
+        DrawRing((Vector2){r->x, r->y}, r->radius - r->thickness * 0.5f,
+                 r->radius + r->thickness * 0.5f, 0, 360, 36, ring_color);
     }
 }
 

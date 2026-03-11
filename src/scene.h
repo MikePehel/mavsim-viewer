@@ -68,6 +68,10 @@ typedef struct {
     int loc_matNormal;
     ortho_mode_t ortho_mode; // fullscreen ortho view (0 = perspective)
     float ortho_span;        // ortho view span in world units
+    // Underwater mode
+    bool is_underwater;      // U key toggle (eventually auto from MAV_TYPE_SUBMARINE)
+    int loc_isUnderwater;    // grid shader uniform
+    int loc_time;            // grid shader uniform (caustic animation)
 } scene_t;
 
 // Initialize scene (ground plane, sky, camera, lighting).
@@ -87,6 +91,9 @@ void scene_draw_sky(const scene_t *s);
 
 // Draw ground fill for ortho side views (call after EndMode3D).
 void scene_draw_ortho_ground(const scene_t *s, int screen_w, int screen_h);
+
+// Draw underwater 2D overlay (edge rings, particles). Call after EndMode3D.
+void scene_draw_underwater_overlay(scene_t *s, int screen_w, int screen_h);
 
 // Cleanup scene resources.
 void scene_cleanup(scene_t *s);

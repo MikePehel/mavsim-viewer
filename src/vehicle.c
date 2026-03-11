@@ -429,7 +429,8 @@ void vehicle_update(vehicle_t *v, const hil_state_t *state, const home_position_
 
 void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
                   int trail_mode, bool show_ground_track, Vector3 cam_pos,
-                  bool classic_colors) {
+                  bool classic_colors, bool is_underwater) {
+    (void)is_underwater; // TODO: underwater trail colors in future pass
     // Per-mode arm recoloring: front/back arms match trail forward/backward colors
     Color saved_front = {0}, saved_back = {0}, saved_red = {0}, saved_green = {0};
     bool recolor_arms = true;

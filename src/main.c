@@ -215,6 +215,7 @@ int main(int argc, char *argv[]) {
     bool origin_specified = false;
     const char *replay_file = NULL;
     bool missile_mode = false;
+    bool fake_mode = false;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-udp") == 0 && i + 1 < argc) {
@@ -244,6 +245,8 @@ int main(int argc, char *argv[]) {
             replay_file = argv[++i];
         } else if (strcmp(argv[i], "-missile") == 0) {
             missile_mode = true;
+        } else if (strcmp(argv[i], "-fake") == 0) {
+            fake_mode = true;
         } else if (strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -271,6 +274,11 @@ int main(int argc, char *argv[]) {
         origin_specified = true; // force shared origin
     }
 
+    if (fake_mode) {
+        vehicle_count = 1;
+        origin_specified = true;
+    }
+
     if (is_replay) {
         vehicle_count = 1;  // single vehicle replay (multi-file is future scope)
         if (data_source_ulog_create(&sources[0], replay_file) != 0) {
@@ -278,7 +286,7 @@ int main(int argc, char *argv[]) {
             CloseWindow();
             return 1;
         }
-    } else if (!missile_mode) {
+    } else if (!missile_mode && !fake_mode) {
         for (int i = 0; i < vehicle_count; i++) {
             if (data_source_mavlink_create(&sources[i], base_port + i, (uint8_t)i, debug) != 0) {
                 fprintf(stderr, "Failed to init MAVLink receiver on port %u\n", base_port + i);
@@ -414,8 +422,87 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        // Fake mode: WASDQE flight control
+        if (fake_mode) {
+            static float fake_x = 0.0f, fake_y = 10.0f, fake_z = 0.0f;
+            static float fake_yaw = 0.0f;   // radians
+            static float fake_pitch = 0.0f; // radians
+            static float fake_roll = 0.0f;
+            float dt = GetFrameTime();
+            float move_speed = 20.0f * dt;  // m/s
+            float rot_speed = 2.0f * dt;    // rad/s
+
+            // Shift = boost
+            if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT))
+                move_speed *= 3.0f;
+
+            // Rotation: arrow keys
+            if (IsKeyDown(KEY_LEFT))  fake_yaw -= rot_speed;
+            if (IsKeyDown(KEY_RIGHT)) fake_yaw += rot_speed;
+
+            // Movement relative to yaw
+            float fwd_x = sinf(fake_yaw);
+            float fwd_z = cosf(fake_yaw);
+            float right_x = cosf(fake_yaw);
+            float right_z = -sinf(fake_yaw);
+
+            // Tilt for visual feedback
+            float target_pitch = 0.0f, target_roll = 0.0f;
+
+            if (IsKeyDown(KEY_W)) { fake_x += fwd_x * move_speed; fake_z += fwd_z * move_speed; target_pitch = -0.3f; }
+            if (IsKeyDown(KEY_S)) { fake_x -= fwd_x * move_speed; fake_z -= fwd_z * move_speed; target_pitch = 0.3f; }
+            if (IsKeyDown(KEY_D)) { fake_x += right_x * move_speed; fake_z += right_z * move_speed; target_roll = 0.4f; }
+            if (IsKeyDown(KEY_A)) { fake_x -= right_x * move_speed; fake_z -= right_z * move_speed; target_roll = -0.4f; }
+            if (IsKeyDown(KEY_E)) fake_y += move_speed;
+            if (IsKeyDown(KEY_Q)) fake_y -= move_speed;
+
+            // Smooth tilt
+            fake_pitch += (target_pitch - fake_pitch) * 5.0f * dt;
+            fake_roll += (target_roll - fake_roll) * 5.0f * dt;
+
+            // Build hil_state
+            double meters_per_deg_lat = 111132.0;
+            double meters_per_deg_lon = 111132.0 * cos(origin_lat * M_PI / 180.0);
+
+            hil_state_t state = {0};
+            state.lat = (int32_t)((origin_lat + (double)fake_z / meters_per_deg_lat) * 1e7);
+            state.lon = (int32_t)((origin_lon + (double)fake_x / meters_per_deg_lon) * 1e7);
+            state.alt = (int32_t)((origin_alt + (double)fake_y) * 1000.0);
+
+            // Velocity for HUD readout
+            float vx = 0, vy = 0, vz = 0;
+            if (IsKeyDown(KEY_W)) { vx += fwd_z * 20.0f; vy += fwd_x * 20.0f; }
+            if (IsKeyDown(KEY_S)) { vx -= fwd_z * 20.0f; vy -= fwd_x * 20.0f; }
+            if (IsKeyDown(KEY_D)) { vy += right_x * 20.0f; vx += right_z * 20.0f; }  // NED east
+            if (IsKeyDown(KEY_A)) { vy -= right_x * 20.0f; vx -= right_z * 20.0f; }
+            float vz_ned = 0;
+            if (IsKeyDown(KEY_E)) vz_ned = -20.0f; // NED down = negative for climb
+            if (IsKeyDown(KEY_Q)) vz_ned = 20.0f;
+            state.vx = (int16_t)(vx * 100.0f);
+            state.vy = (int16_t)(vy * 100.0f);
+            state.vz = (int16_t)(vz_ned * 100.0f);
+            float spd = sqrtf(vx*vx + vy*vy + vz_ned*vz_ned);
+            state.ind_airspeed = (uint16_t)(spd * 100.0f);
+            state.true_airspeed = state.ind_airspeed;
+
+            // Quaternion from yaw/pitch/roll (ZYX convention)
+            float cy = cosf(fake_yaw * 0.5f), sy = sinf(fake_yaw * 0.5f);
+            float cp = cosf(fake_pitch * 0.5f), sp = sinf(fake_pitch * 0.5f);
+            float cr = cosf(fake_roll * 0.5f), sr = sinf(fake_roll * 0.5f);
+            state.quaternion[0] = cr*cp*cy + sr*sp*sy;
+            state.quaternion[1] = sr*cp*cy - cr*sp*sy;
+            state.quaternion[2] = cr*sp*cy + sr*cp*sy;
+            state.quaternion[3] = cr*cp*sy - sr*sp*cy;
+
+            state.valid = true;
+            state.time_usec = (uint64_t)(GetTime() * 1e6);
+
+            vehicle_update(&vehicles[0], &state, NULL);
+            vehicles[0].active = true;
+        }
+
         // Poll all data sources and update vehicles
-        for (int i = 0; i < vehicle_count && !missile_mode; i++) {
+        for (int i = 0; i < vehicle_count && !missile_mode && !fake_mode; i++) {
             data_source_poll(&sources[i], GetFrameTime());
 
             // Reset trail and origin on reconnect
@@ -444,8 +531,8 @@ int main(int argc, char *argv[]) {
         }
 
         // Check if any source is connected (for HUD)
-        bool any_connected = false;
-        for (int i = 0; i < vehicle_count; i++) {
+        bool any_connected = fake_mode || missile_mode;
+        for (int i = 0; i < vehicle_count && !any_connected; i++) {
             if (sources[i].connected) { any_connected = true; break; }
         }
 
@@ -660,7 +747,7 @@ int main(int argc, char *argv[]) {
                     if (vehicles[i].active || vehicle_count == 1) {
                         vehicle_draw(&vehicles[i], scene.view_mode, i == selected,
                                      trail_mode, show_ground_track, scene.camera.position,
-                                     classic_colors);
+                                     classic_colors, scene.is_underwater);
                     }
                 }
             EndMode3D();
@@ -668,11 +755,14 @@ int main(int argc, char *argv[]) {
             // Ortho ground fill (2D overlay)
             scene_draw_ortho_ground(&scene, GetScreenWidth(), GetScreenHeight());
 
+            // Underwater edge rings overlay
+            scene_draw_underwater_overlay(&scene, GetScreenWidth(), GetScreenHeight());
+
             // HUD
             if (show_hud) {
                 hud_draw(&hud, vehicles, sources, vehicle_count,
                          selected, GetScreenWidth(), GetScreenHeight(),
-                         scene.view_mode);
+                         scene.view_mode, scene.is_underwater);
             }
 
             // Debug panel

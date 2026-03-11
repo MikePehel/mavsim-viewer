@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MAVSim → PlotJuggler Marker Bridge</title>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a25;
+    --border: #2a2a3a;
+    --accent: #7c6ef0;
+    --accent2: #4ecdc4;
+    --accent3: #ff6b6b;
+    --text: #e0e0e8;
+    --text-dim: #8888a0;
+    --yellow: #ffd93d;
+    --orange: #ff8c42;
+    --green: #6bcb77;
+    --marker-color: #ff6b6b;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+    line-height: 1.6;
+    padding: 40px 20px;
+  }
+
+  .container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  h1 {
+    font-size: 2.2em;
+    font-weight: 700;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .subtitle {
+    color: var(--text-dim);
+    font-size: 1.1em;
+    margin-bottom: 48px;
+  }
+
+  h2 {
+    font-size: 1.5em;
+    font-weight: 600;
+    margin: 48px 0 20px 0;
+    color: var(--accent2);
+  }
+
+  h3 {
+    font-size: 1.1em;
+    font-weight: 600;
+    margin: 24px 0 12px 0;
+    color: var(--text);
+  }
+
+  p {
+    color: var(--text-dim);
+    margin-bottom: 16px;
+    max-width: 720px;
+  }
+
+  /* ── Flow Diagram ───────────────────────────────────────────── */
+  .flow-diagram {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin: 32px 0;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .flow-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+    text-align: center;
+    min-width: 180px;
+  }
+
+  .flow-box.highlight {
+    border-color: var(--accent);
+    box-shadow: 0 0 20px rgba(124, 110, 240, 0.15);
+  }
+
+  .flow-box.highlight2 {
+    border-color: var(--accent2);
+    box-shadow: 0 0 20px rgba(78, 205, 196, 0.15);
+  }
+
+  .flow-box .icon {
+    font-size: 2em;
+    margin-bottom: 8px;
+  }
+
+  .flow-box .label {
+    font-weight: 600;
+    font-size: 0.95em;
+  }
+
+  .flow-box .detail {
+    color: var(--text-dim);
+    font-size: 0.8em;
+    margin-top: 4px;
+  }
+
+  .flow-arrow {
+    color: var(--text-dim);
+    font-size: 1.5em;
+    padding: 0 8px;
+    flex-shrink: 0;
+  }
+
+  /* ── Timeline Visualization ─────────────────────────────────── */
+  .timeline-container {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    margin: 24px 0;
+    overflow: hidden;
+  }
+
+  .timeline-label {
+    font-size: 0.75em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 16px;
+  }
+
+  /* SVG timeline */
+  .timeline-svg {
+    width: 100%;
+    height: auto;
+  }
+
+  /* ── CSV Preview ────────────────────────────────────────────── */
+  .csv-preview {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin: 20px 0;
+    font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.85em;
+    overflow-x: auto;
+  }
+
+  .csv-preview .header-row {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .csv-preview .data-row {
+    color: var(--text-dim);
+  }
+
+  .csv-preview .data-row .marker-val {
+    color: var(--marker-color);
+    font-weight: 600;
+  }
+
+  .csv-preview .comment {
+    color: #555570;
+  }
+
+  .csv-line {
+    padding: 2px 0;
+    white-space: nowrap;
+  }
+
+  /* ── PlotJuggler Mockup ─────────────────────────────────────── */
+  .pj-mockup {
+    background: #1e1e2e;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    margin: 24px 0;
+  }
+
+  .pj-titlebar {
+    background: #2a2a3e;
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .pj-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+  }
+
+  .pj-dot.r { background: #ff5f57; }
+  .pj-dot.y { background: #febc2e; }
+  .pj-dot.g { background: #28c840; }
+
+  .pj-titlebar .title {
+    color: var(--text-dim);
+    font-size: 0.85em;
+    margin-left: 8px;
+  }
+
+  .pj-content {
+    padding: 20px;
+  }
+
+  .pj-plot {
+    position: relative;
+    height: 140px;
+    margin-bottom: 16px;
+    border: 1px solid #2a2a3e;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #16162a;
+  }
+
+  .pj-plot:last-child {
+    margin-bottom: 0;
+  }
+
+  .pj-plot-label {
+    position: absolute;
+    top: 6px;
+    left: 10px;
+    font-size: 0.7em;
+    color: var(--text-dim);
+    font-family: monospace;
+    z-index: 2;
+  }
+
+  .pj-plot svg {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* ── Keybind Box ────────────────────────────────────────────── */
+  .keybind-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin: 20px 0;
+  }
+
+  .keybind-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .key {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9em;
+    font-weight: 600;
+    color: var(--accent);
+    white-space: nowrap;
+    min-width: 36px;
+    text-align: center;
+  }
+
+  .keybind-desc {
+    font-size: 0.9em;
+    color: var(--text-dim);
+  }
+
+  /* ── HUD Marker Display ─────────────────────────────────────── */
+  .hud-mockup {
+    background: rgba(0, 0, 0, 0.85);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 28px;
+    display: inline-block;
+    margin: 20px 0;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .hud-marker-flash {
+    color: var(--marker-color);
+    font-size: 1.1em;
+    font-weight: 600;
+    animation: marker-flash 2s ease-out infinite;
+  }
+
+  @keyframes marker-flash {
+    0% { opacity: 1; }
+    70% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  .hud-marker-count {
+    color: var(--text-dim);
+    font-size: 0.8em;
+    margin-top: 4px;
+  }
+
+  /* ── Architecture Table ─────────────────────────────────────── */
+  .arch-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 20px 0;
+    font-size: 0.9em;
+  }
+
+  .arch-table th {
+    background: var(--surface);
+    color: var(--accent2);
+    padding: 10px 16px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+  }
+
+  .arch-table td {
+    padding: 10px 16px;
+    border-bottom: 1px solid #1a1a25;
+    color: var(--text-dim);
+  }
+
+  .arch-table tr:hover td {
+    background: var(--surface);
+  }
+
+  .arch-table code {
+    background: var(--surface2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9em;
+    color: var(--accent);
+  }
+
+  /* ── Section divider ────────────────────────────────────────── */
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 48px 0;
+  }
+
+  /* ── Inline code ────────────────────────────────────────────── */
+  code {
+    background: var(--surface2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85em;
+    color: var(--accent);
+  }
+
+  /* ── Timestamp alignment diagram ────────────────────────────── */
+  .timestamp-note {
+    background: var(--surface);
+    border-left: 3px solid var(--yellow);
+    border-radius: 0 8px 8px 0;
+    padding: 16px 20px;
+    margin: 20px 0;
+  }
+
+  .timestamp-note .note-title {
+    color: var(--yellow);
+    font-weight: 600;
+    font-size: 0.9em;
+    margin-bottom: 6px;
+  }
+
+  .timestamp-note p {
+    margin-bottom: 0;
+    font-size: 0.9em;
+  }
+
+  /* ── Comparison cards ───────────────────────────────────────── */
+  .compare-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin: 24px 0;
+  }
+
+  .compare-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+  }
+
+  .compare-card h4 {
+    font-size: 1em;
+    margin-bottom: 12px;
+  }
+
+  .compare-card ul {
+    list-style: none;
+    padding: 0;
+  }
+
+  .compare-card li {
+    color: var(--text-dim);
+    font-size: 0.85em;
+    padding: 4px 0;
+    padding-left: 16px;
+    position: relative;
+  }
+
+  .compare-card li::before {
+    content: '·';
+    position: absolute;
+    left: 0;
+    color: var(--accent2);
+    font-weight: bold;
+  }
+
+  @media (max-width: 700px) {
+    .compare-grid { grid-template-columns: 1fr; }
+    .flow-diagram { flex-direction: column; }
+    .flow-arrow { transform: rotate(90deg); }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>MAVSim → PlotJuggler Marker Bridge</h1>
+<p class="subtitle">Drop timestamped bookmarks during live flight or replay. Export as CSV. Open in PlotJuggler alongside your ULog for instant context.</p>
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<h2>Data Flow</h2>
+<p>The marker system sits between the viewer and PlotJuggler with zero coupling — just a CSV file with timestamps that align to the ULog clock.</p>
+
+<div class="flow-diagram">
+  <div class="flow-box highlight">
+    <div class="icon">🎮</div>
+    <div class="label">MAVSim Viewer</div>
+    <div class="detail">User presses B to mark</div>
+  </div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-box">
+    <div class="icon">📝</div>
+    <div class="label">Marker Buffer</div>
+    <div class="detail">Up to 256 entries in memory</div>
+  </div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-box">
+    <div class="icon">📄</div>
+    <div class="label">CSV Export</div>
+    <div class="detail">flight_markers_&lt;timestamp&gt;.csv</div>
+  </div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-box highlight2">
+    <div class="icon">📊</div>
+    <div class="label">PlotJuggler</div>
+    <div class="detail">Load as secondary data source</div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<h2>What the User Sees in MAVSim</h2>
+<p>When you press <code>B</code>, a brief flash confirms the marker was saved. The current marker count persists in the HUD corner.</p>
+
+<div class="hud-mockup">
+  <div class="hud-marker-flash">▶ MARKER 3 — 14.2s</div>
+  <div class="hud-marker-count">3 markers saved</div>
+</div>
+
+<h3>Proposed Keybindings</h3>
+<div class="keybind-grid">
+  <div class="keybind-item">
+    <span class="key">B</span>
+    <span class="keybind-desc">Drop a marker at current timestamp (auto-labeled "marker_1", "marker_2", …)</span>
+  </div>
+  <div class="keybind-item">
+    <span class="key">Shift+B</span>
+    <span class="keybind-desc">Drop a named marker — cycles through preset labels: "event", "anomaly", "start", "end", "note"</span>
+  </div>
+  <div class="keybind-item">
+    <span class="key">Ctrl+B</span>
+    <span class="keybind-desc">Export markers to CSV immediately (also auto-exports on exit if dirty)</span>
+  </div>
+  <div class="keybind-item">
+    <span class="key">Ctrl+Shift+B</span>
+    <span class="keybind-desc">Clear all markers</span>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<h2>Timeline: Markers During a Flight</h2>
+<p>Markers appear as vertical lines on the flight timeline. Each captures a snapshot of telemetry state at that instant.</p>
+
+<div class="timeline-container">
+  <div class="timeline-label">Flight Timeline — 120 seconds</div>
+  <svg class="timeline-svg" viewBox="0 0 1000 200" preserveAspectRatio="xMidYMid meet">
+    <!-- Background grid -->
+    <defs>
+      <pattern id="grid" width="100" height="50" patternUnits="userSpaceOnUse">
+        <path d="M 100 0 L 100 200" stroke="#1e1e30" stroke-width="1"/>
+        <path d="M 0 50 L 1000 50" stroke="#1e1e30" stroke-width="0.5"/>
+      </pattern>
+    </defs>
+    <rect width="1000" height="200" fill="url(#grid)"/>
+
+    <!-- Time axis -->
+    <line x1="40" y1="180" x2="960" y2="180" stroke="#2a2a3a" stroke-width="1"/>
+    <text x="40" y="195" fill="#555570" font-size="10" font-family="monospace">0s</text>
+    <text x="220" y="195" fill="#555570" font-size="10" font-family="monospace">20s</text>
+    <text x="420" y="195" fill="#555570" font-size="10" font-family="monospace">40s</text>
+    <text x="580" y="195" fill="#555570" font-size="10" font-family="monospace">60s</text>
+    <text x="730" y="195" fill="#555570" font-size="10" font-family="monospace">80s</text>
+    <text x="910" y="195" fill="#555570" font-size="10" font-family="monospace">120s</text>
+
+    <!-- Altitude trace (simulated) -->
+    <polyline points="40,160 80,155 120,140 160,120 200,100 240,85 280,70 320,60 360,55 400,58 440,65 480,72 520,68 560,60 600,55 640,50 680,45 700,48 720,55 740,65 760,80 800,100 840,110 880,130 920,155 960,170"
+      fill="none" stroke="#4ecdc4" stroke-width="2" opacity="0.7"/>
+    <text x="45" y="30" fill="#4ecdc4" font-size="11" font-family="monospace" opacity="0.8">altitude_rel (m)</text>
+
+    <!-- Ground speed trace -->
+    <polyline points="40,170 80,165 120,150 160,135 200,130 240,125 280,128 320,132 360,128 400,120 440,115 480,118 520,122 560,115 600,110 640,108 680,112 700,125 720,140 760,138 800,145 840,155 880,160 920,165 960,168"
+      fill="none" stroke="#7c6ef0" stroke-width="1.5" opacity="0.5"/>
+    <text x="45" y="45" fill="#7c6ef0" font-size="11" font-family="monospace" opacity="0.8">ground_speed (m/s)</text>
+
+    <!-- Marker 1: takeoff -->
+    <line x1="130" y1="15" x2="130" y2="180" stroke="#ff6b6b" stroke-width="2" stroke-dasharray="4,3"/>
+    <circle cx="130" cy="140" r="5" fill="#ff6b6b"/>
+    <rect x="105" y="8" width="75" height="18" rx="4" fill="#ff6b6b" opacity="0.9"/>
+    <text x="115" y="20" fill="white" font-size="9" font-family="monospace" font-weight="600">marker_1</text>
+
+    <!-- Marker 2: peak altitude -->
+    <line x1="430" y1="15" x2="430" y2="180" stroke="#ff6b6b" stroke-width="2" stroke-dasharray="4,3"/>
+    <circle cx="430" cy="65" r="5" fill="#ff6b6b"/>
+    <rect x="405" y="8" width="70" height="18" rx="4" fill="#ff6b6b" opacity="0.9"/>
+    <text x="413" y="20" fill="white" font-size="9" font-family="monospace" font-weight="600">anomaly</text>
+
+    <!-- Marker 3: roll oscillation -->
+    <line x1="620" y1="15" x2="620" y2="180" stroke="#ff6b6b" stroke-width="2" stroke-dasharray="4,3"/>
+    <circle cx="620" cy="55" r="5" fill="#ff6b6b"/>
+    <rect x="600" y="8" width="62" height="18" rx="4" fill="#ff6b6b" opacity="0.9"/>
+    <text x="607" y="20" fill="white" font-size="9" font-family="monospace" font-weight="600">roll_osc</text>
+
+    <!-- Marker 4: landing -->
+    <line x1="880" y1="15" x2="880" y2="180" stroke="#ff6b6b" stroke-width="2" stroke-dasharray="4,3"/>
+    <circle cx="880" cy="130" r="5" fill="#ff6b6b"/>
+    <rect x="863" y="8" width="55" height="18" rx="4" fill="#ff6b6b" opacity="0.9"/>
+    <text x="870" y="20" fill="white" font-size="9" font-family="monospace" font-weight="600">flare</text>
+  </svg>
+</div>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<h2>CSV Output Format</h2>
+<p>The exported CSV is designed for direct import into PlotJuggler as a secondary data source. The <code>marker</code> column acts as a pulse signal — it's 1.0 at each marked timestamp and absent elsewhere, so PlotJuggler draws it as vertical spikes on the timeline.</p>
+
+<div class="csv-preview">
+  <div class="csv-line comment"># MAVSim flight markers — exported 2026-03-10T14:23:07</div>
+  <div class="csv-line comment"># Load in PlotJuggler: File → Load Data, select this CSV</div>
+  <div class="csv-line comment"># Drag "marker" column onto any plot as vertical reference lines</div>
+  <div class="csv-line header-row">timestamp_s,marker,label,altitude_m,ground_speed_ms,roll_deg,pitch_deg,heading_deg</div>
+  <div class="csv-line data-row">14.203,<span class="marker-val">1.0</span>,marker_1,12.4,8.2,3.1,-2.5,045</div>
+  <div class="csv-line data-row">42.871,<span class="marker-val">1.0</span>,anomaly,48.7,15.1,-22.4,5.8,178</div>
+  <div class="csv-line data-row">61.445,<span class="marker-val">1.0</span>,roll_osc,52.1,14.3,38.9,-1.2,220</div>
+  <div class="csv-line data-row">94.112,<span class="marker-val">1.0</span>,flare,8.2,6.4,1.8,8.5,045</div>
+</div>
+
+<h3>Why This Format?</h3>
+<div class="compare-grid">
+  <div class="compare-card">
+    <h4 style="color: var(--accent2);">timestamp_s (seconds)</h4>
+    <ul>
+      <li>PlotJuggler expects seconds as the time axis</li>
+      <li>Converted from <code>time_usec</code> ÷ 1,000,000</li>
+      <li>Relative to boot time — same clock as ULog</li>
+      <li>Sub-millisecond precision preserved</li>
+    </ul>
+  </div>
+  <div class="compare-card">
+    <h4 style="color: var(--marker-color);">marker (pulse signal)</h4>
+    <ul>
+      <li>Always 1.0 — PlotJuggler renders as discrete spikes</li>
+      <li>Drag onto any existing plot as an overlay</li>
+      <li>Vertical lines appear exactly at marker timestamps</li>
+      <li>Works with PlotJuggler's "XY plot" and "TimeSeries" views</li>
+    </ul>
+  </div>
+  <div class="compare-card">
+    <h4 style="color: var(--accent);">Snapshot Telemetry</h4>
+    <ul>
+      <li>Captures vehicle state at the exact moment of marking</li>
+      <li>Useful for quick reference without scrubbing ULog</li>
+      <li>Each column is independently plottable in PJ</li>
+    </ul>
+  </div>
+  <div class="compare-card">
+    <h4 style="color: var(--yellow);">label (string)</h4>
+    <ul>
+      <li>PlotJuggler shows string columns in its data table</li>
+      <li>Searchable in PJ's sidebar</li>
+      <li>Auto-generated if user doesn't specify</li>
+    </ul>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<h2>PlotJuggler View (Mockup)</h2>
+<p>After loading both the ULog and the marker CSV, the red dashed lines appear across all synchronized plot panels at the exact timestamps you bookmarked in MAVSim.</p>
+
+<div class="pj-mockup">
+  <div class="pj-titlebar">
+    <span class="pj-dot r"></span>
+    <span class="pj-dot y"></span>
+    <span class="pj-dot g"></span>
+    <span class="title">PlotJuggler — flight_2026-03-10.ulg + flight_markers_2026-03-10.csv</span>
+  </div>
+  <div class="pj-content">
+    <!-- Plot 1: Attitude (from ULog) -->
+    <div class="pj-plot">
+      <div class="pj-plot-label">vehicle_attitude.rollspeed [rad/s]</div>
+      <svg viewBox="0 0 800 140" preserveAspectRatio="none">
+        <rect width="800" height="140" fill="#16162a"/>
+        <!-- Grid lines -->
+        <line x1="0" y1="70" x2="800" y2="70" stroke="#1e1e30" stroke-width="1"/>
+        <line x1="0" y1="35" x2="800" y2="35" stroke="#1e1e30" stroke-width="0.5"/>
+        <line x1="0" y1="105" x2="800" y2="105" stroke="#1e1e30" stroke-width="0.5"/>
+
+        <!-- Roll rate signal (from ULog) -->
+        <polyline points="0,70 20,68 40,72 60,65 80,70 100,73 110,68 120,60 130,52 140,48 150,55 160,65 170,72 180,70 200,68 220,70 240,72 260,68 280,70 300,65 320,72 340,30 345,15 350,45 355,85 360,110 365,55 370,35 375,80 380,105 385,50 390,40 395,75 400,70 420,68 440,72 460,65 480,70 500,68 520,72 540,70 560,68 580,70 600,72 620,68 640,70 660,72 680,68 700,65 720,70 740,72 760,70 780,68 800,70"
+          fill="none" stroke="#4ecdc4" stroke-width="1.5"/>
+
+        <!-- Marker lines -->
+        <line x1="95" y1="0" x2="95" y2="140" stroke="#ff6b6b" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.8"/>
+        <line x1="340" y1="0" x2="340" y2="140" stroke="#ff6b6b" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.8"/>
+        <text x="342" y="12" fill="#ff6b6b" font-size="8" font-family="monospace">anomaly</text>
+        <line x1="500" y1="0" x2="500" y2="140" stroke="#ff6b6b" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.8"/>
+        <line x1="720" y1="0" x2="720" y2="140" stroke="#ff6b6b" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.8"/>
+      </svg>
+    </div>
+
+    <!-- Plot 2: Altitude (from ULog) -->
+    <div class="pj-plot">
+      <div class="pj-plot-label">vehicle_local_position.z [m]</div>
+      <svg viewBox="0 0 800 140" preserveAspectRatio="none">
+        <rect width="800" height="140" fill="#16162a"/>
+        <line x1="0" y1="70" x2="800" y2="70" stroke="#1e1e30" stroke-width="1"/>
+
+        <!-- Altitude signal -->
+        <polyline points="0,130 40,125 80,115 120,100 160,85 200,70 240,60 280,50 320,42 360,38 400,40 440,42 480,40 520,38 560,36 600,38 640,42 680,55 720,75 760,100 800,125"
+          fill="none" stroke="#ffd93d" stroke-width="1.5"/>
+
+        <!-- Same marker lines — synchronized across panels -->
+        <line x1="95" y1="0" x2="95" y2="140" stroke="#ff6b6b" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.8"/>
+        <text x="97" y="12" fill="#ff6b6b" font-size="8" font-family="monospace">marker_1</text>
+        <line x1="340" y1="0" x2="340" y2="140" stroke="#ff6b6b" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.8"/>
+        <line x1="500" y1="0" x2="500" y2="140" stroke="#ff6b6b" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.8"/>
+        <text x="502" y="12" fill="#ff6b6b" font-size="8" font-family="monospace">roll_osc</text>
+        <line x1="720" y1="0" x2="720" y2="140" stroke="#ff6b6b" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.8"/>
+        <text x="722" y="12" fill="#ff6b6b" font-size="8" font-family="monospace">flare</text>
+      </svg>
+    </div>
+
+    <!-- Plot 3: Actuator outputs (from ULog) -->
+    <div class="pj-plot">
+      <div class="pj-plot-label">actuator_outputs.output[0..3]</div>
+      <svg viewBox="0 0 800 140" preserveAspectRatio="none">
+        <rect width="800" height="140" fill="#16162a"/>
+        <line x1="0" y1="70" x2="800" y2="70" stroke="#1e1e30" stroke-width="1"/>
+
+        <!-- Motor outputs (4 channels) -->
+        <polyline points="0,100 40,95 80,85 120,80 160,75 200,72 240,70 280,68 320,65 340,30 345,15 350,50 360,72 380,70 400,68 440,70 480,68 520,70 560,68 600,70 640,72 680,80 720,90 760,100 800,110"
+          fill="none" stroke="#6bcb77" stroke-width="1.2" opacity="0.8"/>
+        <polyline points="0,105 40,100 80,88 120,82 160,78 200,74 240,72 280,70 320,68 340,95 345,120 350,80 360,70 380,68 400,70 440,72 480,70 520,72 560,70 600,72 640,74 680,82 720,92 760,102 800,112"
+          fill="none" stroke="#ff8c42" stroke-width="1.2" opacity="0.8"/>
+
+        <!-- Marker lines -->
+        <line x1="95" y1="0" x2="95" y2="140" stroke="#ff6b6b" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.8"/>
+        <line x1="340" y1="0" x2="340" y2="140" stroke="#ff6b6b" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.8"/>
+        <line x1="500" y1="0" x2="500" y2="140" stroke="#ff6b6b" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.8"/>
+        <line x1="720" y1="0" x2="720" y2="140" stroke="#ff6b6b" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.8"/>
+      </svg>
+    </div>
+  </div>
+</div>
+
+<p>Notice how the "anomaly" marker at t≈42s lines up with the roll rate oscillation in the top panel, the altitude plateau in the middle, and the motor output spikes in the bottom. That's the whole point — you saw something weird during the flight, marked it, and now you can immediately find the exact moment across all internal signals.</p>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<h2>Timestamp Alignment</h2>
+
+<div class="timestamp-note">
+  <div class="note-title">Clock Synchronization</div>
+  <p>Both the ULog and our markers use <code>time_usec</code> from the flight controller's boot clock. Since our viewer receives this timestamp directly in <code>HIL_STATE_QUATERNION</code>, the marker timestamps should align with the ULog timeline with no offset — they're the same clock source. For replay mode, timestamps come directly from the ULog itself, so alignment is guaranteed.</p>
+</div>
+
+<div class="compare-grid">
+  <div class="compare-card">
+    <h4 style="color: var(--green);">Live Flight (UDP)</h4>
+    <ul>
+      <li><code>time_usec</code> from HIL_STATE_QUATERNION</li>
+      <li>Same boot-relative clock as ULog on SD card</li>
+      <li>Network latency adds ~1-5ms offset (negligible)</li>
+      <li>Marker timestamp = last received <code>time_usec</code></li>
+    </ul>
+  </div>
+  <div class="compare-card">
+    <h4 style="color: var(--accent);">Replay Mode (ULog)</h4>
+    <ul>
+      <li>Timestamps read directly from ULog file</li>
+      <li>Perfect alignment guaranteed — same source</li>
+      <li>Pause + mark works (uses last played timestamp)</li>
+      <li>Seek doesn't affect previously placed markers</li>
+    </ul>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<h2>Implementation Scope</h2>
+
+<table class="arch-table">
+  <thead>
+    <tr>
+      <th>Component</th>
+      <th>File</th>
+      <th>Changes</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Marker storage & CSV export</td>
+      <td><code>flight_marker.c/h</code></td>
+      <td>New files. ~120 lines. Struct array, add/export/clear functions.</td>
+    </tr>
+    <tr>
+      <td>Input handling</td>
+      <td><code>main.c</code></td>
+      <td>4 keybinds (B, Shift+B, Ctrl+B, Ctrl+Shift+B). ~25 lines.</td>
+    </tr>
+    <tr>
+      <td>HUD feedback</td>
+      <td><code>hud.c/h</code></td>
+      <td>Flash notification on mark. Marker count in corner. ~30 lines.</td>
+    </tr>
+    <tr>
+      <td>Auto-export on exit</td>
+      <td><code>main.c</code></td>
+      <td>Call export before cleanup if markers are dirty. 3 lines.</td>
+    </tr>
+    <tr>
+      <td>CMakeLists.txt</td>
+      <td><code>CMakeLists.txt</code></td>
+      <td>Add <code>flight_marker.c</code> to sources. 1 line.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Total estimated addition: ~180 lines of C across all files. No new dependencies. No network code. No PlotJuggler API integration needed — just file I/O.</p>
+
+<hr class="divider">
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<h2>Workflow Summary</h2>
+
+<div class="flow-diagram">
+  <div class="flow-box">
+    <div class="icon">✈️</div>
+    <div class="label">Fly / Replay</div>
+    <div class="detail">Watch in MAVSim viewer</div>
+  </div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-box highlight">
+    <div class="icon">🔖</div>
+    <div class="label">Press B</div>
+    <div class="detail">"That looked wrong"</div>
+  </div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-box">
+    <div class="icon">🚪</div>
+    <div class="label">Close Viewer</div>
+    <div class="detail">CSV auto-exports</div>
+  </div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-box highlight2">
+    <div class="icon">🔍</div>
+    <div class="label">Open PlotJuggler</div>
+    <div class="detail">Load ULog + markers CSV</div>
+  </div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-box">
+    <div class="icon">🎯</div>
+    <div class="label">Jump to Moment</div>
+    <div class="detail">Red lines mark your bookmarks</div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

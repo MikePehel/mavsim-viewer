@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Speed Ribbon Techniques — MAVSim Viewer R&D</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; color: #ccc; font-family: 'JetBrains Mono', 'Fira Code', monospace; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+
+  header { padding: 10px 20px; border-bottom: 1px solid #222; display: flex; align-items: baseline; gap: 20px; flex-shrink: 0; }
+  header h1 { font-size: 16px; color: #fff; font-weight: 500; }
+  header span { font-size: 11px; color: #666; }
+
+  .layout { display: grid; grid-template-columns: 240px 1fr; flex: 1; min-height: 0; }
+
+  /* ── Sidebar ── */
+  .sidebar { background: #0f0f16; border-right: 1px solid #1a1a25; padding: 12px; overflow-y: auto; min-height: 0; }
+  .sidebar h2 { font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: #555; margin: 10px 0 6px; }
+  .sidebar h2:first-child { margin-top: 0; }
+
+  .tech-btn {
+    display: block; width: 100%; text-align: left; padding: 8px 10px; margin: 3px 0;
+    background: #14141e; border: 1px solid #1e1e2e; border-radius: 6px;
+    color: #aaa; font-size: 11px; font-family: inherit; cursor: pointer; transition: all 0.15s;
+  }
+  .tech-btn:hover { border-color: #3a3a5a; color: #ddd; }
+  .tech-btn.active { border-color: #5a7af7; color: #fff; background: #1a1a30; }
+  .tech-btn .tag { display: block; font-size: 9px; color: #556; margin-top: 3px; }
+  .tech-btn.active .tag { color: #5a7af7; }
+
+  .slider-group { margin: 5px 0; }
+  .slider-group label { font-size: 11px; color: #777; display: flex; justify-content: space-between; }
+  .slider-group input[type=range] {
+    width: 100%; margin-top: 4px; accent-color: #5a7af7;
+    -webkit-appearance: none; height: 4px; background: #1e1e2e; border-radius: 2px; outline: none;
+  }
+  .slider-group input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+    background: #5a7af7; cursor: pointer;
+  }
+
+  .info-box {
+    margin-top: 8px; padding: 8px; background: #111119; border: 1px solid #1a1a25;
+    border-radius: 6px; font-size: 10px; line-height: 1.5;
+  }
+  .info-box h3 { color: #5a7af7; font-size: 10px; margin-bottom: 3px; font-weight: 600; }
+  .info-box .stat { color: #888; }
+  .info-box .val { color: #ddd; }
+
+  .legend { margin-top: 8px; }
+  .legend-item { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 11px; }
+  .legend-swatch { width: 24px; height: 4px; border-radius: 2px; }
+
+  /* ── Canvas Area ── */
+  .canvas-area { position: relative; background: #08080d; min-height: 0; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  .overlay-stats {
+    position: absolute; top: 12px; right: 16px; font-size: 11px; color: #555;
+    text-align: right; pointer-events: none;
+  }
+  .overlay-stats .val { color: #888; }
+
+  .help-hint {
+    position: absolute; bottom: 12px; left: 16px; font-size: 10px; color: #333;
+  }
+
+  /* ── Comparison strip ── */
+  .compare-strip {
+    position: absolute; bottom: 0; left: 0; right: 0; height: 120px;
+    background: linear-gradient(transparent, rgba(8,8,13,0.95) 30%);
+    display: none; padding: 30px 20px 12px;
+  }
+  .compare-strip.visible { display: flex; gap: 12px; justify-content: center; }
+  .compare-thumb {
+    width: 160px; height: 80px; border: 1px solid #222; border-radius: 4px;
+    background: #0a0a0f; position: relative; overflow: hidden;
+  }
+  .compare-thumb canvas { width: 100%; height: 100%; }
+  .compare-thumb .label {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    padding: 2px 6px; background: rgba(0,0,0,0.8); font-size: 9px; color: #888;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Speed Ribbon Techniques</h1>
+  <span>Interactive comparison — drag to orbit, scroll to zoom</span>
+</header>
+
+<div class="layout">
+  <div class="sidebar">
+    <h2>Technique</h2>
+    <button class="tech-btn active" data-tech="linear">
+      1. Raw Linear Segments
+      <span class="tag">Baseline — current implementation</span>
+    </button>
+    <button class="tech-btn" data-tech="catmull">
+      2. Centripetal Catmull-Rom
+      <span class="tag">C1 spline · passes through points</span>
+    </button>
+    <button class="tech-btn" data-tech="chaikin">
+      3. Chaikin Corner-Cutting
+      <span class="tag">Iterative subdivision · approximating</span>
+    </button>
+    <button class="tech-btn" data-tech="parallel">
+      4. Parallel Transport Frame
+      <span class="tag">Twist-free orientation · world-space</span>
+    </button>
+
+    <h2>Parameters</h2>
+    <div class="slider-group" id="sg-subdiv">
+      <label>Subdivisions <span id="lbl-subdiv" class="val">4</span></label>
+      <input type="range" id="sl-subdiv" min="1" max="16" value="4">
+    </div>
+    <div class="slider-group" id="sg-iter" style="display:none">
+      <label>Iterations <span id="lbl-iter" class="val">3</span></label>
+      <input type="range" id="sl-iter" min="1" max="6" value="3">
+    </div>
+    <div class="slider-group">
+      <label>Ribbon Width <span id="lbl-width" class="val">1.0</span></label>
+      <input type="range" id="sl-width" min="0.1" max="3.0" step="0.1" value="1.0">
+    </div>
+    <div class="slider-group" id="sg-alpha" style="display:none">
+      <label>Alpha (parameterization) <span id="lbl-alpha" class="val">0.5</span></label>
+      <input type="range" id="sl-alpha" min="0" max="1.0" step="0.1" value="0.5">
+    </div>
+    <div class="slider-group">
+      <label>Speed (playback) <span id="lbl-speed" class="val">1.0×</span></label>
+      <input type="range" id="sl-speed" min="0.1" max="4.0" step="0.1" value="1.0">
+    </div>
+
+    <div class="info-box" id="info-panel">
+      <h3>Raw Linear Segments</h3>
+      <p>Direct point-to-point quads with perpendicular blending. Fast but sharp corners on tight turns.</p>
+      <br>
+      <span class="stat">Vertices:</span> <span class="val" id="info-verts">—</span><br>
+      <span class="stat">Triangles:</span> <span class="val" id="info-tris">—</span><br>
+      <span class="stat">Frame time:</span> <span class="val" id="info-ms">—</span>
+    </div>
+
+    <div class="legend">
+      <h2>Heat Map</h2>
+      <div class="legend-item"><div class="legend-swatch" style="background: linear-gradient(90deg, #1a1aff, #00ccff)"></div> Slow</div>
+      <div class="legend-item"><div class="legend-swatch" style="background: linear-gradient(90deg, #00ff88, #ffff00)"></div> Medium</div>
+      <div class="legend-item"><div class="legend-swatch" style="background: linear-gradient(90deg, #ff8800, #ff0033)"></div> Fast</div>
+    </div>
+  </div>
+
+  <div class="canvas-area">
+    <canvas id="c"></canvas>
+    <div class="overlay-stats">
+      <span class="val" id="fps-counter">60 fps</span>
+    </div>
+    <div class="help-hint">LMB drag = orbit · Scroll = zoom · RMB drag = pan</div>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────
+//  FLIGHT PATH: a simulated multirotor flight with varied maneuvers
+// ─────────────────────────────────────────────────────────────
+function generateFlightPath() {
+  const pts = [];
+  const speeds = [];
+  const N = 300;
+  for (let i = 0; i < N; i++) {
+    const t = i / N;
+
+    // Takeoff, loiter circle, figure-8, fast straight, descending spiral
+    let x, y, z, spd;
+    if (t < 0.08) {
+      // Takeoff
+      const u = t / 0.08;
+      x = 0; z = 0; y = u * 12;
+      spd = 2 + u * 3;
+    } else if (t < 0.3) {
+      // Loiter circle (slow)
+      const u = (t - 0.08) / 0.22;
+      const a = u * Math.PI * 2;
+      x = Math.cos(a) * 15;
+      z = Math.sin(a) * 15;
+      y = 12 + Math.sin(a * 2) * 2;
+      spd = 5 + Math.sin(a * 3) * 2;
+    } else if (t < 0.55) {
+      // Figure-8 (moderate speed, tight turns)
+      const u = (t - 0.3) / 0.25;
+      const a = u * Math.PI * 2;
+      x = Math.sin(a) * 20;
+      z = Math.sin(a * 2) * 12;
+      y = 14 + Math.cos(a * 3) * 3;
+      spd = 8 + Math.abs(Math.cos(a)) * 7;
+    } else if (t < 0.72) {
+      // Fast straight run with banking
+      const u = (t - 0.55) / 0.17;
+      x = -20 + u * 50;
+      z = -12 + Math.sin(u * Math.PI * 4) * 4;
+      y = 14 + Math.sin(u * Math.PI * 2) * 5;
+      spd = 15 + u * 10;
+    } else if (t < 0.92) {
+      // Descending spiral
+      const u = (t - 0.72) / 0.20;
+      const a = u * Math.PI * 3;
+      const r = 10 - u * 5;
+      x = 30 + Math.cos(a) * r;
+      z = Math.sin(a) * r;
+      y = 14 * (1 - u * 0.8);
+      spd = 12 - u * 8;
+    } else {
+      // Landing approach
+      const u = (t - 0.92) / 0.08;
+      x = 30 - u * 30;
+      z = 0;
+      y = 14 * 0.2 * (1 - u);
+      spd = 4 - u * 3;
+    }
+    pts.push([x, y, z]);
+    speeds.push(Math.max(spd, 0.5));
+  }
+  return { pts, speeds };
+}
+
+const flight = generateFlightPath();
+
+// ─────────────────────────────────────────────────────────────
+//  MATH UTILITIES
+// ─────────────────────────────────────────────────────────────
+function v3sub(a, b) { return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
+function v3add(a, b) { return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
+function v3scale(a, s) { return [a[0]*s, a[1]*s, a[2]*s]; }
+function v3dot(a, b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
+function v3cross(a, b) { return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]; }
+function v3len(a) { return Math.sqrt(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]); }
+function v3norm(a) { const l = v3len(a); return l < 1e-8 ? [0,0,0] : [a[0]/l, a[1]/l, a[2]/l]; }
+function v3lerp(a, b, t) { return [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t]; }
+
+function heatColor(t) {
+  t = Math.max(0, Math.min(1, t));
+  let r, g, b;
+  if (t < 0.25) {
+    const u = t / 0.25;
+    r = 26; g = 26 + u * 178; b = 255 - u * 55;
+  } else if (t < 0.5) {
+    const u = (t - 0.25) / 0.25;
+    r = u * 100; g = 204 + u * 51; b = 200 * (1 - u);
+  } else if (t < 0.75) {
+    const u = (t - 0.5) / 0.25;
+    r = 100 + u * 155; g = 255 - u * 55; b = u * 20;
+  } else {
+    const u = (t - 0.75) / 0.25;
+    r = 255; g = 200 - u * 148; b = 20 - u * 20;
+  }
+  return `rgb(${r|0},${g|0},${b|0})`;
+}
+
+// ─────────────────────────────────────────────────────────────
+//  TECHNIQUE 1: RAW LINEAR SEGMENTS
+// ─────────────────────────────────────────────────────────────
+function buildLinear(pts, speeds) {
+  return { centerline: pts.slice(), speeds: speeds.slice() };
+}
+
+// ─────────────────────────────────────────────────────────────
+//  TECHNIQUE 2: CENTRIPETAL CATMULL-ROM
+// ─────────────────────────────────────────────────────────────
+function catmullRomPoint(p0, p1, p2, p3, t) {
+  const t2 = t*t, t3 = t2*t;
+  return [
+    0.5*((2*p1[0]) + (-p0[0]+p2[0])*t + (2*p0[0]-5*p1[0]+4*p2[0]-p3[0])*t2 + (-p0[0]+3*p1[0]-3*p2[0]+p3[0])*t3),
+    0.5*((2*p1[1]) + (-p0[1]+p2[1])*t + (2*p0[1]-5*p1[1]+4*p2[1]-p3[1])*t2 + (-p0[1]+3*p1[1]-3*p2[1]+p3[1])*t3),
+    0.5*((2*p1[2]) + (-p0[2]+p2[2])*t + (2*p0[2]-5*p1[2]+4*p2[2]-p3[2])*t2 + (-p0[2]+3*p1[2]-3*p2[2]+p3[2])*t3),
+  ];
+}
+
+function centripetalKnot(p0, p1, alpha) {
+  const d = v3len(v3sub(p1, p0));
+  return Math.pow(d, alpha);
+}
+
+function centripetalCatmullRom(p0, p1, p2, p3, alpha, t) {
+  // Non-uniform Catmull-Rom with centripetal parameterization
+  const t01 = centripetalKnot(p0, p1, alpha);
+  const t12 = centripetalKnot(p1, p2, alpha);
+  const t23 = centripetalKnot(p2, p3, alpha);
+
+  // Fall back to uniform Catmull-Rom if any knot interval is degenerate
+  if (t01 < 1e-6 || t12 < 1e-6 || t23 < 1e-6) {
+    return catmullRomPoint(p0, p1, p2, p3, t);
+  }
+
+  // Compute tangents
+  const m1 = v3add(
+    v3sub(p2, p1),
+    v3scale(v3sub(v3scale(v3sub(p1, p0), 1/t01), v3scale(v3sub(p2, p0), 1/(t01+t12))), t12)
+  );
+  const m2 = v3add(
+    v3sub(p2, p1),
+    v3scale(v3sub(v3scale(v3sub(p3, p2), 1/t23), v3scale(v3sub(p3, p1), 1/(t12+t23))), t12)
+  );
+
+  // Hermite interpolation
+  const t2 = t*t, t3 = t2*t;
+  const h00 = 2*t3 - 3*t2 + 1;
+  const h10 = t3 - 2*t2 + t;
+  const h01 = -2*t3 + 3*t2;
+  const h11 = t3 - t2;
+
+  return [
+    h00*p1[0] + h10*m1[0] + h01*p2[0] + h11*m2[0],
+    h00*p1[1] + h10*m1[1] + h01*p2[1] + h11*m2[1],
+    h00*p1[2] + h10*m1[2] + h01*p2[2] + h11*m2[2],
+  ];
+}
+
+function buildCatmullRom(pts, speeds, subdivisions, alpha) {
+  const out = [], outSpd = [];
+  const n = pts.length;
+  for (let i = 0; i < n - 1; i++) {
+    const i0 = Math.max(0, i - 1);
+    const i1 = i;
+    const i2 = Math.min(n - 1, i + 1);
+    const i3 = Math.min(n - 1, i + 2);
+    for (let j = 0; j < subdivisions; j++) {
+      const t = j / subdivisions;
+      out.push(centripetalCatmullRom(pts[i0], pts[i1], pts[i2], pts[i3], alpha, t));
+      outSpd.push(speeds[i1] + (speeds[i2] - speeds[i1]) * t);
+    }
+  }
+  out.push(pts[n-1]);
+  outSpd.push(speeds[n-1]);
+  return { centerline: out, speeds: outSpd };
+}
+
+// ─────────────────────────────────────────────────────────────
+//  TECHNIQUE 3: CHAIKIN CORNER-CUTTING
+// ─────────────────────────────────────────────────────────────
+function chaikinSmooth(pts, speeds, iterations) {
+  let curPts = pts.slice();
+  let curSpd = speeds.slice();
+
+  for (let iter = 0; iter < iterations; iter++) {
+    const newPts = [curPts[0]];
+    const newSpd = [curSpd[0]];
+    for (let i = 0; i < curPts.length - 1; i++) {
+      newPts.push(v3lerp(curPts[i], curPts[i+1], 0.25));
+      newPts.push(v3lerp(curPts[i], curPts[i+1], 0.75));
+      newSpd.push(curSpd[i] * 0.75 + curSpd[i+1] * 0.25);
+      newSpd.push(curSpd[i] * 0.25 + curSpd[i+1] * 0.75);
+    }
+    newPts.push(curPts[curPts.length - 1]);
+    newSpd.push(curSpd[curSpd.length - 1]);
+    curPts = newPts;
+    curSpd = newSpd;
+  }
+  return { centerline: curPts, speeds: curSpd };
+}
+
+// ─────────────────────────────────────────────────────────────
+//  TECHNIQUE 4: PARALLEL TRANSPORT FRAME
+//  (uses Catmull-Rom for the centerline, but generates ribbon
+//   with twist-free parallel-transported normals instead of
+//   camera-facing billboard quads)
+// ─────────────────────────────────────────────────────────────
+function rodriguesRotate(v, axis, angle) {
+  const c = Math.cos(angle), s = Math.sin(angle);
+  const d = v3dot(axis, v);
+  const cr = v3cross(axis, v);
+  return v3add(v3add(v3scale(v, c), v3scale(cr, s)), v3scale(axis, d * (1 - c)));
+}
+
+function buildParallelTransport(pts, speeds, subdivisions, alpha) {
+  // First smooth centerline with centripetal Catmull-Rom
+  const smooth = buildCatmullRom(pts, speeds, subdivisions, alpha);
+  const cl = smooth.centerline;
+  const n = cl.length;
+  if (n < 2) return { centerline: cl, speeds: smooth.speeds, normals: [] };
+
+  // Compute tangents
+  const tangents = [];
+  for (let i = 0; i < n; i++) {
+    if (i < n - 1) tangents.push(v3norm(v3sub(cl[i+1], cl[i])));
+    else tangents.push(tangents[i-1]);
+  }
+
+  // Parallel transport: propagate initial normal
+  const normals = new Array(n);
+  // Choose initial normal perpendicular to first tangent
+  const T0 = tangents[0];
+  let up = [0, 1, 0];
+  if (Math.abs(v3dot(T0, up)) > 0.95) up = [1, 0, 0];
+  normals[0] = v3norm(v3cross(T0, up));
+
+  for (let i = 0; i < n - 1; i++) {
+    const b = v3cross(tangents[i], tangents[i+1]);
+    const blen = v3len(b);
+    if (blen < 1e-8) {
+      normals[i+1] = normals[i];
+    } else {
+      const axis = v3scale(b, 1/blen);
+      const angle = Math.acos(Math.max(-1, Math.min(1, v3dot(tangents[i], tangents[i+1]))));
+      normals[i+1] = v3norm(rodriguesRotate(normals[i], axis, angle));
+    }
+  }
+
+  smooth.normals = normals;
+  smooth.tangents = tangents;
+  return smooth;
+}
+
+// ─────────────────────────────────────────────────────────────
+//  3D RENDERER (Canvas 2D with manual projection)
+// ─────────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let camTheta = 0.6, camPhi = 0.4, camDist = 80;
+let camTarget = [5, 6, 0];
+let panOffset = [0, 0, 0];
+let activeTech = 'linear';
+let subdivisions = 4;
+let chaikinIter = 3;
+let ribbonWidth = 1.0;
+let alpha = 0.5;
+let playbackSpeed = 1.0;
+let trailLen = 0;
+let animTime = 0;
+
+// Camera controls
+let dragging = false, panning = false, lastX, lastY;
+canvas.addEventListener('mousedown', e => {
+  if (e.button === 0) { dragging = true; }
+  if (e.button === 2) { panning = true; }
+  lastX = e.clientX; lastY = e.clientY;
+});
+window.addEventListener('mousemove', e => {
+  const dx = e.clientX - lastX, dy = e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+  if (dragging) { camTheta -= dx * 0.005; camPhi = Math.max(-1.2, Math.min(1.2, camPhi - dy * 0.005)); }
+  if (panning) {
+    const scale = camDist * 0.002;
+    panOffset[0] -= dx * scale * Math.cos(camTheta);
+    panOffset[2] -= dx * scale * Math.sin(camTheta);
+    panOffset[1] += dy * scale;
+  }
+});
+window.addEventListener('mouseup', e => { dragging = false; panning = false; });
+canvas.addEventListener('wheel', e => { camDist *= 1 + e.deltaY * 0.001; camDist = Math.max(10, Math.min(250, camDist)); e.preventDefault(); }, {passive:false});
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+// CSS pixel dimensions (updated each frame)
+let cssW = 800, cssH = 600;
+
+function project(p) {
+  const cx = camTarget[0] + panOffset[0] + Math.cos(camPhi)*Math.sin(camTheta)*camDist;
+  const cy = camTarget[1] + panOffset[1] + Math.sin(camPhi)*camDist;
+  const cz = camTarget[2] + panOffset[2] + Math.cos(camPhi)*Math.cos(camTheta)*camDist;
+  const camPos = [cx, cy, cz];
+  const tgt = [camTarget[0]+panOffset[0], camTarget[1]+panOffset[1], camTarget[2]+panOffset[2]];
+
+  const fwd = v3norm(v3sub(tgt, camPos));
+  const right = v3norm(v3cross(fwd, [0,1,0]));
+  const up = v3cross(right, fwd);
+
+  const rel = v3sub(p, camPos);
+  const x = v3dot(rel, right);
+  const y = v3dot(rel, up);
+  const z = v3dot(rel, fwd);
+
+  if (z < 0.1) return null;
+  const fov = 1.8;
+  const hw = cssW / 2, hh = cssH / 2;
+  return { x: hw + x / z * hw * fov, y: hh - y / z * hh * fov, z };
+}
+
+function getCameraPos() {
+  return [
+    camTarget[0]+panOffset[0]+Math.cos(camPhi)*Math.sin(camTheta)*camDist,
+    camTarget[1]+panOffset[1]+Math.sin(camPhi)*camDist,
+    camTarget[2]+panOffset[2]+Math.cos(camPhi)*Math.cos(camTheta)*camDist
+  ];
+}
+
+// ── Ribbon rendering ──
+function drawRibbon(data, maxTrail) {
+  const cl = data.centerline;
+  const spds = data.speeds;
+  const normals = data.normals;
+  const usePT = (activeTech === 'parallel' && normals && normals.length > 0);
+  const maxSpd = Math.max(...spds);
+  const camPos = getCameraPos();
+  const n = Math.min(cl.length, maxTrail);
+  if (n < 2) return { verts: 0, tris: 0 };
+
+  let verts = 0, tris = 0;
+
+  // Build ribbon quads
+  const baseHW = 0.3 * ribbonWidth;
+  let prevPerp = null;
+
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = cl[i], p1 = cl[i+1];
+    const seg = v3sub(p1, p0);
+    const segLen = v3len(seg);
+    if (segLen < 1e-6) continue;
+    const dir = v3scale(seg, 1/segLen);
+
+    let perp;
+    if (usePT) {
+      // Parallel transport: use precomputed normal
+      perp = normals[i];
+    } else {
+      // Billboard: face camera
+      const mid = v3scale(v3add(p0, p1), 0.5);
+      const toCam = v3norm(v3sub(camPos, mid));
+      perp = v3cross(dir, toCam);
+      let plen = v3len(perp);
+      if (plen < 0.01) {
+        if (prevPerp) perp = prevPerp;
+        else continue;
+      } else {
+        perp = v3scale(perp, 1/plen);
+      }
+    }
+
+    // Anti-twist blending
+    if (prevPerp && !usePT) {
+      if (v3dot(perp, prevPerp) < 0) perp = v3scale(perp, -1);
+      perp = v3norm(v3lerp(prevPerp, perp, 0.3));
+    }
+    prevPerp = perp;
+
+    // Speed-based width
+    const s0 = spds[i] / maxSpd;
+    const s1 = spds[Math.min(i+1, spds.length-1)] / maxSpd;
+    const hw0 = 0.08 + s0 * s0 * baseHW;
+    const hw1 = 0.08 + s1 * s1 * baseHW;
+
+    const heat = (s0 + s1) * 0.5;
+    const opacity = Math.min(1, (i / n) * 2);
+
+    const a = v3add(p0, v3scale(perp, hw0));
+    const b = v3sub(p0, v3scale(perp, hw0));
+    const d = v3add(p1, v3scale(perp, hw1));
+    const e = v3sub(p1, v3scale(perp, hw1));
+
+    const pa = project(a), pb = project(b), pd = project(d), pe = project(e);
+    if (!pa || !pb || !pd || !pe) continue;
+
+    ctx.globalAlpha = opacity * 0.85;
+    ctx.fillStyle = heatColor(heat);
+
+    // Draw quad as two triangles
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.lineTo(pd.x, pd.y);
+    ctx.closePath(); ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(pb.x, pb.y); ctx.lineTo(pe.x, pe.y); ctx.lineTo(pd.x, pd.y);
+    ctx.closePath(); ctx.fill();
+
+    verts += 4; tris += 2;
+  }
+
+  ctx.globalAlpha = 1;
+  return { verts, tris };
+}
+
+function drawControlPoints(pts, maxTrail) {
+  const n = Math.min(pts.length, maxTrail);
+  ctx.fillStyle = 'rgba(255,255,255,0.15)';
+  for (let i = 0; i < n; i += 3) {
+    const p = project(pts[i]);
+    if (p) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 1.5, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+}
+
+function drawGround() {
+  // Grid
+  ctx.strokeStyle = 'rgba(50,50,80,0.2)';
+  ctx.lineWidth = 0.5;
+  for (let x = -60; x <= 60; x += 5) {
+    const a = project([x, 0, -60]), b = project([x, 0, 60]);
+    if (a && b) { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+    const c = project([-60, 0, x]), d = project([60, 0, x]);
+    if (c && d) { ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(d.x, d.y); ctx.stroke(); }
+  }
+  // Origin marker
+  const o = project([0, 0.1, 0]);
+  if (o) {
+    ctx.fillStyle = 'rgba(90,122,247,0.3)';
+    ctx.beginPath(); ctx.arc(o.x, o.y, 4, 0, Math.PI*2); ctx.fill();
+  }
+}
+
+// Draw the vehicle dot at current trail end
+function drawVehicle(cl, maxTrail) {
+  const idx = Math.min(cl.length - 1, maxTrail - 1);
+  if (idx < 0) return;
+  const p = project(cl[idx]);
+  if (!p) return;
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#5a7af7';
+  ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI*2); ctx.fill();
+}
+
+// ── UI Wiring ──
+const techBtns = document.querySelectorAll('.tech-btn');
+const infoDescs = {
+  linear: { title: 'Raw Linear Segments', desc: 'Direct point-to-point quads. Each trail sample pair becomes a flat quad with perpendicular blending (70/30) to reduce twist. Simple and fast, but produces visible corners on tight turns and the figure-8 crossing.' },
+  catmull: { title: 'Centripetal Catmull-Rom', desc: 'Non-uniform C1 spline that passes exactly through every trail point. Centripetal parameterization (α=0.5) prevents cusps and self-intersections that uniform Catmull-Rom produces on uneven spacing. Each segment is subdivided into smooth sub-arcs.' },
+  chaikin: { title: 'Chaikin Corner-Cutting', desc: 'Iterative subdivision: each pass replaces every edge with two new points at 25% and 75%. Converges to a quadratic B-spline. Does NOT pass through original points — the path shrinks inward slightly. Extremely simple (just lerps), but point count doubles per iteration.' },
+  parallel: { title: 'Parallel Transport Frame', desc: 'Uses Catmull-Rom for the centerline, but generates ribbon orientation via parallel-transported normals instead of camera-facing billboards. The frame propagates forward with minimal rotation (Rodrigues\' formula), producing a twist-free world-space ribbon. Visible edge-on, but physically meaningful orientation.' },
+};
+
+techBtns.forEach(btn => {
+  btn.addEventListener('click', () => {
+    techBtns.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeTech = btn.dataset.tech;
+
+    // Show/hide relevant controls
+    document.getElementById('sg-subdiv').style.display =
+      (activeTech === 'catmull' || activeTech === 'parallel') ? '' : 'none';
+    document.getElementById('sg-iter').style.display =
+      activeTech === 'chaikin' ? '' : 'none';
+    document.getElementById('sg-alpha').style.display =
+      (activeTech === 'catmull' || activeTech === 'parallel') ? '' : 'none';
+
+    const info = infoDescs[activeTech];
+    document.getElementById('info-panel').innerHTML =
+      `<h3>${info.title}</h3><p>${info.desc}</p><br>` +
+      '<span class="stat">Vertices:</span> <span class="val" id="info-verts">—</span><br>' +
+      '<span class="stat">Triangles:</span> <span class="val" id="info-tris">—</span><br>' +
+      '<span class="stat">Points (smoothed):</span> <span class="val" id="info-pts">—</span><br>' +
+      '<span class="stat">Frame time:</span> <span class="val" id="info-ms">—</span>';
+  });
+});
+
+document.getElementById('sl-subdiv').addEventListener('input', e => {
+  subdivisions = parseInt(e.target.value);
+  document.getElementById('lbl-subdiv').textContent = subdivisions;
+});
+document.getElementById('sl-iter').addEventListener('input', e => {
+  chaikinIter = parseInt(e.target.value);
+  document.getElementById('lbl-iter').textContent = chaikinIter;
+});
+document.getElementById('sl-width').addEventListener('input', e => {
+  ribbonWidth = parseFloat(e.target.value);
+  document.getElementById('lbl-width').textContent = ribbonWidth.toFixed(1);
+});
+document.getElementById('sl-alpha').addEventListener('input', e => {
+  alpha = parseFloat(e.target.value);
+  document.getElementById('lbl-alpha').textContent = alpha.toFixed(1);
+});
+document.getElementById('sl-speed').addEventListener('input', e => {
+  playbackSpeed = parseFloat(e.target.value);
+  document.getElementById('lbl-speed').textContent = playbackSpeed.toFixed(1) + '×';
+});
+
+// ── Main Loop ──
+let lastTime = 0;
+let frameCount = 0, fpsAccum = 0;
+
+function frame(now) {
+  const dt = Math.min((now - lastTime) / 1000, 0.05);
+  lastTime = now;
+
+  // Resize
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  cssW = rect.width;
+  cssH = rect.height;
+  if (canvas.width !== Math.round(cssW * dpr) || canvas.height !== Math.round(cssH * dpr)) {
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    canvas.style.width = cssW + 'px';
+    canvas.style.height = cssH + 'px';
+  }
+
+  // Animate trail growth
+  animTime += dt * playbackSpeed;
+  const totalPts = flight.pts.length;
+  trailLen = Math.min(totalPts, Math.floor(animTime * 40));
+  if (trailLen >= totalPts) { animTime = 0; trailLen = 0; }
+
+  const t0 = performance.now();
+
+  // Build smoothed data
+  const slicePts = flight.pts.slice(0, trailLen);
+  const sliceSpd = flight.speeds.slice(0, trailLen);
+  let data;
+  if (activeTech === 'linear') {
+    data = buildLinear(slicePts, sliceSpd);
+  } else if (activeTech === 'catmull') {
+    data = trailLen > 3 ? buildCatmullRom(slicePts, sliceSpd, subdivisions, alpha) : buildLinear(slicePts, sliceSpd);
+  } else if (activeTech === 'chaikin') {
+    data = trailLen > 2 ? chaikinSmooth(slicePts, sliceSpd, chaikinIter) : buildLinear(slicePts, sliceSpd);
+  } else {
+    data = trailLen > 3 ? buildParallelTransport(slicePts, sliceSpd, subdivisions, alpha) : buildLinear(slicePts, sliceSpd);
+  }
+
+  // Clear & draw
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+  ctx.save();
+
+  drawGround();
+  drawControlPoints(slicePts, trailLen);
+  const stats = drawRibbon(data, data.centerline.length);
+  drawVehicle(data.centerline, data.centerline.length);
+
+  ctx.restore();
+
+  const frameMs = performance.now() - t0;
+
+  // Update stats
+  frameCount++;
+  fpsAccum += dt;
+  if (fpsAccum > 0.5) {
+    document.getElementById('fps-counter').textContent = Math.round(frameCount / fpsAccum) + ' fps';
+    frameCount = 0; fpsAccum = 0;
+  }
+
+  const iv = document.getElementById('info-verts');
+  const it = document.getElementById('info-tris');
+  const ip = document.getElementById('info-pts');
+  const im = document.getElementById('info-ms');
+  if (iv) iv.textContent = stats.verts.toLocaleString();
+  if (it) it.textContent = stats.tris.toLocaleString();
+  if (ip) ip.textContent = data.centerline.length.toLocaleString();
+  if (im) im.textContent = frameMs.toFixed(2) + ' ms';
+
+  requestAnimationFrame(frame);
+}
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -18,12 +18,50 @@ uniform sampler2D groundTex;
 uniform vec4 colFog;
 uniform vec4 colTint;
 
+// Underwater uniforms
+uniform int isUnderwater;
+uniform float uTime;
+
 out vec4 finalColor;
+
+float caustic(vec2 uv, float t) {
+    vec2 uv1 = uv * 8.0 + vec2(t * 0.3, t * 0.2);
+    vec2 uv2 = uv * 6.0 + vec2(-t * 0.2, t * 0.35);
+
+    float c1 = sin(uv1.x + sin(uv1.y * 0.8))
+             * sin(uv1.y + sin(uv1.x * 0.6));
+    float c2 = sin(uv2.x + sin(uv2.y * 0.7))
+             * sin(uv2.y + sin(uv2.x * 0.9));
+
+    float c = (c1 + c2) * 0.5;
+    return clamp(c * c, 0.0, 1.0);
+}
 
 void main() {
     vec2 coord = fragWorldPos.xz;
     float dist = length(coord);
 
+    if (isUnderwater != 0) {
+        // ── Underwater: caustic pattern replaces grid ──
+        float c = caustic(coord * 0.01, uTime);
+
+        // Caustic color from colMinor (repurposed as caustic tint)
+        vec3 causticCol = colMinor.rgb * c * 0.35;
+        vec4 color = vec4(colGround.rgb + causticCol, 1.0);
+
+        // Shorter fog distance underwater (use colFog for fog range hints)
+        // fogStart and fogEnd encoded: fogStart=60, fogEnd=200 for default
+        float fogStart = 60.0;
+        float fogEnd = 200.0;
+        float fade = 1.0 - smoothstep(fogStart, fogEnd, dist);
+        color.rgb = mix(colFog.rgb, color.rgb, fade);
+
+        color.a = 1.0;
+        finalColor = color;
+        return;
+    }
+
+    // ── Normal grid rendering ──
     // Ground color: flat or terrain-textured with distance fog
     vec4 ground = colGround;
     if (texEnabled != 0) {
