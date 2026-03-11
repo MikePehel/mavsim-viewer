@@ -814,36 +814,77 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
         float line_h = 24 * s;
         float col_gap = 24 * s;
 
+        // Grouped shortcut entries: NULL key = section header
         typedef struct { const char *key; const char *action; } shortcut_entry_t;
-        shortcut_entry_t entries[] = {
-            {"C",           "Toggle camera mode (Chase / FPV)"},
-            {"V",           "Cycle view mode (Grid / Rez / Snow)"},
-            {"TAB",         "Cycle to next vehicle"},
-            {"[ / ]",       "Previous / next vehicle"},
-            {"1-9",         "Select vehicle directly"},
-            {"Shift+1-9",   "Toggle pin/unpin vehicle to HUD"},
-            {"H",           "Toggle HUD visibility"},
-            {"M",           "Cycle vehicle model"},
-            {"Left-drag",   "Orbit camera (chase mode)"},
-            {"Scroll",      "Zoom FOV"},
-            {"?",           "Toggle this help"},
-            {"Space",       "Pause/resume replay"},
-            {"+/-",         "Replay speed"},
-            {"<-/->",       "Seek 5s (Shift: 30s)"},
-            {"L",           "Toggle replay loop"},
-            {"R",           "Restart replay"},
-        };
-        int entry_count = sizeof(entries) / sizeof(entries[0]);
 
-        // Measure widths for alignment
+        // Left column: VIEW + VEHICLE
+        shortcut_entry_t left_col[] = {
+            {NULL,          "VIEW"},
+            {"C",           "Camera mode (Chase / FPV)"},
+            {"V",           "View mode (Grid / Rez / Snow)"},
+            {"F",           "Terrain texture"},
+            {"K",           "Arm colors (classic / modern)"},
+            {"O",           "Orthographic side panel"},
+            {"Ctrl+D",      "Debug overlay"},
+            {"Alt+1-7",     "Ortho views (1=perspective)"},
+            {NULL,          "VEHICLE"},
+            {"M",           "Cycle model (Shift: all)"},
+            {"TAB",         "Next vehicle"},
+            {"[ / ]",       "Prev / next vehicle"},
+            {"1-9",         "Select vehicle"},
+            {"Sh+1-9",      "Pin / unpin to HUD"},
+        };
+
+        // Right column: HUD + CAMERA + REPLAY
+        shortcut_entry_t right_col[] = {
+            {NULL,          "HUD"},
+            {"H",           "Toggle HUD"},
+            {"T",           "Cycle trail mode"},
+            {"G",           "Ground track projection"},
+            {"?",           "Toggle this help"},
+            {NULL,          "CAMERA"},
+            {"Drag",        "Orbit (chase mode)"},
+            {"Scroll",      "Zoom FOV"},
+            {"Alt+Scrl",    "Zoom ortho span"},
+            {NULL,          "REPLAY"},
+            {"Space",       "Pause / resume"},
+            {"+/-",         "Playback speed"},
+            {"<-/->",       "Seek 5s (Shift: 30s)"},
+            {"L",           "Toggle loop"},
+            {"I",           "Interpolation"},
+            {"R",           "Restart"},
+        };
+
+        int left_count = sizeof(left_col) / sizeof(left_col[0]);
+        int right_count = sizeof(right_col) / sizeof(right_col[0]);
+        int max_rows = left_count > right_count ? left_count : right_count;
+
+        float help_fs_group = 14 * s;
+        float group_top_pad = 6 * s;
+
+        // Measure max key width across both columns
         float max_key_w = 0;
-        for (int i = 0; i < entry_count; i++) {
-            Vector2 kw = MeasureTextEx(h->font_value, entries[i].key, help_fs, 0.5f);
+        for (int i = 0; i < left_count; i++) {
+            if (!left_col[i].key) continue;
+            Vector2 kw = MeasureTextEx(h->font_value, left_col[i].key, help_fs, 0.5f);
+            if (kw.x > max_key_w) max_key_w = kw.x;
+        }
+        for (int i = 0; i < right_count; i++) {
+            if (!right_col[i].key) continue;
+            Vector2 kw = MeasureTextEx(h->font_value, right_col[i].key, help_fs, 0.5f);
             if (kw.x > max_key_w) max_key_w = kw.x;
         }
 
-        float panel_w = max_key_w + col_gap + 320 * s;
-        float panel_h = 40 * s + entry_count * line_h + 20 * s;
+        // Count group headers for extra padding
+        int left_headers = 0, right_headers = 0;
+        for (int i = 0; i < left_count; i++) if (!left_col[i].key) left_headers++;
+        for (int i = 0; i < right_count; i++) if (!right_col[i].key) right_headers++;
+        int max_headers = left_headers > right_headers ? left_headers : right_headers;
+
+        float col_w = max_key_w + col_gap + 220 * s;
+        float mid_gap = 32 * s;
+        float panel_w = col_w * 2 + mid_gap + 40 * s;
+        float panel_h = 40 * s + max_rows * line_h + max_headers * group_top_pad + 20 * s;
         float panel_x = (screen_w - panel_w) / 2.0f;
         float panel_y = (screen_h - panel_h) / 2.0f;
 
@@ -862,16 +903,29 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
                    (Vector2){panel_x + (panel_w - tw.x) / 2, panel_y + 12 * s},
                    help_fs_title, 0.5f, accent);
 
-        // Entries
-        float ey = panel_y + 40 * s;
-        float key_x = panel_x + 20 * s;
-        float action_x = key_x + max_key_w + col_gap;
-        for (int i = 0; i < entry_count; i++) {
-            DrawTextEx(h->font_value, entries[i].key,
-                       (Vector2){key_x, ey}, help_fs, 0.5f, accent);
-            DrawTextEx(h->font_label, entries[i].action,
-                       (Vector2){action_x, ey}, help_fs, 0.5f, value_color);
-            ey += line_h;
+        // Draw a column of grouped entries
+        float ey_start = panel_y + 40 * s;
+        shortcut_entry_t *cols[] = { left_col, right_col };
+        int counts[] = { left_count, right_count };
+
+        for (int c = 0; c < 2; c++) {
+            float key_x = panel_x + 20 * s + c * (col_w + mid_gap);
+            float action_x = key_x + max_key_w + col_gap;
+            float ey = ey_start;
+            for (int i = 0; i < counts[c]; i++) {
+                if (!cols[c][i].key) {
+                    // Section header
+                    if (i > 0) ey += group_top_pad;
+                    DrawTextEx(h->font_label, cols[c][i].action,
+                               (Vector2){key_x, ey}, help_fs_group, 0.5f, dim_color);
+                } else {
+                    DrawTextEx(h->font_value, cols[c][i].key,
+                               (Vector2){key_x, ey}, help_fs, 0.5f, accent);
+                    DrawTextEx(h->font_label, cols[c][i].action,
+                               (Vector2){action_x, ey}, help_fs, 0.5f, value_color);
+                }
+                ey += line_h;
+            }
         }
     }
 }
