@@ -17,45 +17,66 @@
 #include "ortho_panel.h"
 #include "asset_path.h"
 
+// Process memory query (avoids windows.h / raylib conflicts)
+#ifdef _MSC_VER
+  // Forward-declare just what we need from Win32 API
+  typedef struct { unsigned long cb; unsigned long PageFaultCount;
+    size_t PeakWorkingSetSize; size_t WorkingSetSize;
+    size_t QuotaPeakPagedPoolUsage; size_t QuotaPagedPoolUsage;
+    size_t QuotaPeakNonPagedPoolUsage; size_t QuotaNonPagedPoolUsage;
+    size_t PagefileUsage; size_t PeakPagefileUsage;
+  } PROCESS_MEMORY_COUNTERS_T;
+  __declspec(dllimport) void* __stdcall GetCurrentProcess(void);
+  __declspec(dllimport) int __stdcall K32GetProcessMemoryInfo(void*, PROCESS_MEMORY_COUNTERS_T*, unsigned long);
+  #pragma comment(lib, "kernel32.lib")
+  static size_t get_process_memory_mb(void) {
+      PROCESS_MEMORY_COUNTERS_T pmc = {0};
+      pmc.cb = sizeof(pmc);
+      if (K32GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc)))
+          return pmc.WorkingSetSize / (1024 * 1024);
+      return 0;
+  }
+#else
+  static size_t get_process_memory_mb(void) { return 0; }
+#endif
+
 #define MAX_VEHICLES 65
 #define MISSILE_COUNT 16
 #define BENCH_COUNT  64
 
-static const Color vehicle_colors[MAX_VEHICLES] = {
-    {230, 230, 230, 255}, // 0: white (default single)
-    {230,  41,  55, 255}, // 1: red
-    {  0, 228,  48, 255}, // 2: green
-    {  0, 121, 241, 255}, // 3: blue
-    {253, 249,   0, 255}, // 4: yellow
-    {255,   0, 255, 255}, // 5: magenta
-    {  0, 255, 255, 255}, // 6: cyan
-    {255, 161,   0, 255}, // 7: orange
-    {200, 122, 255, 255}, // 8: purple
-    {127, 106,  79, 255}, // 9: brown
-    {255, 109, 194, 255}, // 10: pink
-    {  0, 182, 172, 255}, // 11: teal
-    {135, 206, 235, 255}, // 12: sky blue
-    {255, 203, 164, 255}, // 13: peach
-    {170, 255, 128, 255}, // 14: lime
-    {200, 200, 200, 255}, // 15: silver
-    {255,  50,  50, 255}, // 16: target (red)
-    {180, 255, 200, 255}, // 17: mint
-    {255, 220, 100, 255}, // 18: gold
-    {100, 149, 237, 255}, // 19: cornflower
-    {220, 100, 100, 255}, // 20: salmon
-    { 60, 200, 120, 255}, // 21: emerald
-    {200, 160, 255, 255}, // 22: lavender
-    {255, 140, 100, 255}, // 23: coral
-    { 80, 220, 220, 255}, // 24: aqua
-    {240, 200, 180, 255}, // 25: sand
-    {140, 180, 255, 255}, // 26: periwinkle
-    {255, 180, 220, 255}, // 27: rose
-    {160, 220,  80, 255}, // 28: chartreuse
-    {220, 180, 140, 255}, // 29: tan
-    {100, 200, 255, 255}, // 30: light blue
-    {255, 160, 160, 255}, // 31: light red
-    {180, 220, 180, 255}, // 32: sage
-};
+// HSV to RGB for procedural color generation
+static Color hsv_to_color(float h, float s, float v) {
+    float c = v * s;
+    float x = c * (1.0f - fabsf(fmodf(h / 60.0f, 2.0f) - 1.0f));
+    float m = v - c;
+    float r, g, b;
+    if (h < 60)       { r = c; g = x; b = 0; }
+    else if (h < 120) { r = x; g = c; b = 0; }
+    else if (h < 180) { r = 0; g = c; b = x; }
+    else if (h < 240) { r = 0; g = x; b = c; }
+    else if (h < 300) { r = x; g = 0; b = c; }
+    else               { r = c; g = 0; b = x; }
+    return (Color){ (unsigned char)((r+m)*255), (unsigned char)((g+m)*255),
+                    (unsigned char)((b+m)*255), 255 };
+}
+
+static Color vehicle_color(int i) {
+    // First 16: hand-picked distinct colors
+    static const Color named[] = {
+        {230, 230, 230, 255}, {230,  41,  55, 255}, {  0, 228,  48, 255},
+        {  0, 121, 241, 255}, {253, 249,   0, 255}, {255,   0, 255, 255},
+        {  0, 255, 255, 255}, {255, 161,   0, 255}, {200, 122, 255, 255},
+        {127, 106,  79, 255}, {255, 109, 194, 255}, {  0, 182, 172, 255},
+        {135, 206, 235, 255}, {255, 203, 164, 255}, {170, 255, 128, 255},
+        {200, 200, 200, 255},
+    };
+    if (i < 16) return named[i];
+    // Beyond 16: golden-angle hue spread with alternating brightness
+    float hue = fmodf(i * 137.508f, 360.0f);
+    float sat = 0.7f + (i % 3) * 0.1f;
+    float val = 0.8f + (i % 2) * 0.15f;
+    return hsv_to_color(hue, sat, val);
+}
 
 // ── Anime missile barrage simulation ────────────────────────────────────────
 // 16 drones launch from a near-single origin, arc outward in a spherical fan,
@@ -325,6 +346,14 @@ int main(int argc, char *argv[]) {
     bool missile_mode = false;
     bool bench_mode = false;
     int bench_count = 0;
+    float bench_duration = 0.0f;    // auto-exit after N seconds (0 = disabled)
+    int bench_trail_mode = -1;      // -1 = don't override
+    int bench_underwater = -1;      // -1 = don't override
+    int bench_view = -1;            // -1 = don't override (0=grid,1=jmav,2=rez,3=snow,4=1988)
+    int bench_sel = -1;             // -1 = auto (center drone)
+    int bench_ortho = 0;            // 0 = perspective, 1 = ORTHO_TOP
+    int bench_sidebar = 0;          // 0 = off, 1 = sidebar ortho panels
+    const char *bench_outfile = NULL;
     bool fake_mode = false;
 
     for (int i = 1; i < argc; i++) {
@@ -357,13 +386,35 @@ int main(int argc, char *argv[]) {
             missile_mode = true;
         } else if (strcmp(argv[i], "-bench") == 0) {
             bench_mode = true;
-            bench_count = BENCH_COUNT;
+            bench_count = 16; // default benchmark
         } else if (strcmp(argv[i], "-bench9") == 0) {
             bench_mode = true;
             bench_count = 9;
+        } else if (strcmp(argv[i], "-bench16") == 0) {
+            bench_mode = true;
+            bench_count = 16;
         } else if (strcmp(argv[i], "-bench32") == 0) {
             bench_mode = true;
             bench_count = 32;
+        } else if (strcmp(argv[i], "-bench64") == 0) {
+            bench_mode = true;
+            bench_count = 64;
+        } else if (strcmp(argv[i], "-benchtime") == 0 && i + 1 < argc) {
+            bench_duration = (float)atof(argv[++i]);
+        } else if (strcmp(argv[i], "-benchtrail") == 0 && i + 1 < argc) {
+            bench_trail_mode = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "-benchuw") == 0) {
+            bench_underwater = 1;
+        } else if (strcmp(argv[i], "-benchview") == 0 && i + 1 < argc) {
+            bench_view = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "-benchout") == 0 && i + 1 < argc) {
+            bench_outfile = argv[++i];
+        } else if (strcmp(argv[i], "-benchsel") == 0 && i + 1 < argc) {
+            bench_sel = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "-benchortho") == 0) {
+            bench_ortho = 1;
+        } else if (strcmp(argv[i], "-benchsidebar") == 0) {
+            bench_sidebar = 1;
         } else if (strcmp(argv[i], "-fake") == 0) {
             fake_mode = true;
         } else if (strcmp(argv[i], "--help") == 0) {
@@ -434,19 +485,19 @@ int main(int argc, char *argv[]) {
         // Missiles: FPV quads, target: VTOL
         for (int i = 0; i < MISSILE_COUNT; i++) {
             vehicle_init(&vehicles[i], MODEL_FPV_QUAD, scene.lighting_shader);
-            vehicles[i].color = vehicle_colors[i];
+            vehicles[i].color = vehicle_color(i);
         }
         vehicle_init(&vehicles[MISSILE_COUNT], MODEL_VTOL, scene.lighting_shader);
-        vehicles[MISSILE_COUNT].color = vehicle_colors[MISSILE_COUNT];
+        vehicles[MISSILE_COUNT].color = vehicle_color(MISSILE_COUNT);
     } else if (bench_mode) {
         for (int i = 0; i < bench_count; i++) {
             vehicle_init(&vehicles[i], MODEL_QUADROTOR, scene.lighting_shader);
-            vehicles[i].color = vehicle_colors[i % 16];
+            vehicles[i].color = vehicle_color(i);
         }
     } else {
         for (int i = 0; i < vehicle_count; i++) {
             vehicle_init(&vehicles[i], model_idx, scene.lighting_shader);
-            vehicles[i].color = vehicle_colors[i];
+            vehicles[i].color = vehicle_color(i);
         }
     }
 
@@ -472,8 +523,18 @@ int main(int argc, char *argv[]) {
 
     ortho_panel_t ortho;
     ortho_panel_init(&ortho);
+    if (bench_sidebar) ortho.visible = true;
 
     int selected = 0;
+    if (bench_mode && bench_sel >= 0) {
+        selected = bench_sel;
+    } else if (bench_mode) {
+        // Auto-select back-center drone: middle of last row
+        int cols = (int)ceilf(sqrtf((float)bench_count));
+        int last_row = (bench_count - 1) / cols;
+        selected = last_row * cols + cols / 2;
+        if (selected >= bench_count) selected = bench_count - 1;
+    }
     bool was_connected[MAX_VEHICLES];
     memset(was_connected, 0, sizeof(was_connected));
     Vector3 last_pos[MAX_VEHICLES];
@@ -484,8 +545,100 @@ int main(int argc, char *argv[]) {
     bool classic_colors = false;     // L key: toggle classic (red/blue) vs modern (yellow/purple)
     bool missile_paused = false;
 
+    // Benchmark instrumentation
+    if (bench_trail_mode >= 0) trail_mode = bench_trail_mode;
+    if (bench_underwater == 1) scene.is_underwater = true;
+    if (bench_view >= 0) scene.view_mode = (view_mode_t)bench_view;
+
+    // Bench ortho: top-down view
+    if (bench_mode && bench_ortho) {
+        scene.ortho_mode = ORTHO_TOP;
+        // Set span to cover the full formation
+        int cols = (int)ceilf(sqrtf((float)bench_count));
+        float grid_sp = BENCH_RADIUS * 2.5f;
+        scene.ortho_span = cols * grid_sp + BENCH_RADIUS * 4.0f;
+    }
+
+    // Bench camera: free mode, positioned behind and above the entire formation
+    if (bench_mode && bench_duration > 0.0f && !bench_ortho) {
+        scene.cam_mode = CAM_MODE_FREE;
+        int cols = (int)ceilf(sqrtf((float)bench_count));
+        float grid_sp = BENCH_RADIUS * 2.5f;
+        float extent = cols * grid_sp;  // total grid width
+        // Position: behind (+Z), above, looking at center
+        float cam_dist = extent * 1.2f + BENCH_RADIUS * 2.0f;
+        float cam_height = extent * 0.6f + 40.0f;
+        scene.camera.position = (Vector3){ 0.0f, cam_height, cam_dist };
+        scene.camera.target = (Vector3){ 0.0f, BENCH_RADIUS + 10.0f, 0.0f };
+        scene.camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
+    }
+
+    #define BENCH_MAX_SAMPLES 4096
+    float bench_fps_samples[BENCH_MAX_SAMPLES];
+    int bench_sample_count = 0;
+    float bench_elapsed = 0.0f;
+    float bench_sample_timer = 0.0f;
+    float bench_fps_min = 9999.0f, bench_fps_max = 0.0f, bench_fps_sum = 0.0f;
+
     // Main loop
     while (!WindowShouldClose()) {
+        // Benchmark: collect FPS and auto-exit
+        if (bench_duration > 0.0f) {
+            float dt = GetFrameTime();
+            bench_elapsed += dt;
+            bench_sample_timer += dt;
+            if (bench_elapsed > 2.0f) { // skip first 2s warmup
+                float fps = (float)GetFPS();
+                if (bench_sample_timer >= 0.1f) { // sample every 100ms
+                    bench_sample_timer = 0.0f;
+                    if (bench_sample_count < BENCH_MAX_SAMPLES) {
+                        bench_fps_samples[bench_sample_count++] = fps;
+                    }
+                    bench_fps_sum += fps;
+                    if (fps < bench_fps_min) bench_fps_min = fps;
+                    if (fps > bench_fps_max) bench_fps_max = fps;
+                }
+            }
+            if (bench_elapsed >= bench_duration + 2.0f) { // +2s for warmup
+                // Sort for percentiles
+                for (int i = 0; i < bench_sample_count - 1; i++)
+                    for (int j = i + 1; j < bench_sample_count; j++)
+                        if (bench_fps_samples[i] > bench_fps_samples[j]) {
+                            float tmp = bench_fps_samples[i];
+                            bench_fps_samples[i] = bench_fps_samples[j];
+                            bench_fps_samples[j] = tmp;
+                        }
+                float avg = bench_sample_count > 0 ? bench_fps_sum / bench_sample_count : 0;
+                float p1  = bench_sample_count > 0 ? bench_fps_samples[(int)(bench_sample_count * 0.01f)] : 0;
+                float p5  = bench_sample_count > 0 ? bench_fps_samples[(int)(bench_sample_count * 0.05f)] : 0;
+                float med = bench_sample_count > 0 ? bench_fps_samples[bench_sample_count / 2] : 0;
+
+                size_t mem_mb = get_process_memory_mb();
+                int render_w = GetRenderWidth();
+                int render_h = GetRenderHeight();
+
+                if (bench_outfile) {
+                    FILE *f = fopen(bench_outfile, "a");
+                    if (f) {
+                        fprintf(f, "%d,%d,%d,%d,%d,%d,%dx%d,%dx%d,%zu,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%d\n",
+                                bench_count, bench_trail_mode, bench_underwater == 1 ? 1 : 0,
+                                bench_view >= 0 ? bench_view : 0, bench_ortho, bench_sidebar,
+                                GetScreenWidth(), GetScreenHeight(),
+                                render_w, render_h, mem_mb,
+                                bench_fps_min, p1, p5, med, avg, bench_fps_max,
+                                bench_sample_count);
+                        fclose(f);
+                    }
+                }
+                printf("BENCH: drones=%d trail=%d uw=%d view=%d res=%dx%d fb=%dx%d mem=%zuMB | "
+                       "FPS min=%.1f 1%%=%.1f 5%%=%.1f med=%.1f avg=%.1f max=%.1f (n=%d)\n",
+                       bench_count, trail_mode, scene.is_underwater ? 1 : 0,
+                       (int)scene.view_mode, GetScreenWidth(), GetScreenHeight(),
+                       render_w, render_h, mem_mb,
+                       bench_fps_min, p1, p5, med, avg, bench_fps_max, bench_sample_count);
+                break;
+            }
+        }
         // Sync underwater flag to vehicles (controls Y clamp in vehicle_update)
         for (int i = 0; i < vehicle_count; i++)
             vehicles[i].is_underwater = scene.is_underwater;
