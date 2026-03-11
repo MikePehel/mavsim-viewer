@@ -41,10 +41,9 @@ jobs:
           echo "sha256=${SHA}" >> "$GITHUB_OUTPUT"
           echo "Tarball SHA256: ${SHA}"
 
-      - name: Create draft release
+      - name: Create release
         run: |
           gh release create ${{ github.ref_name }} \
-            --draft \
             --title "${{ github.ref_name }}" \
             --generate-notes
         env:
@@ -189,25 +188,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ── Job 3: Publish the release ─────────────────────────────────────────────
-  publish-release:
-    name: Publish release
-    needs: [bottle-arm64, deb-amd64]
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Mark release as published
-        run: |
-          gh release edit ${{ github.ref_name }} \
-            --repo ${{ github.repository }} \
-            --draft=false
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # ── Job 4: Update Homebrew tap ─────────────────────────────────────────────
+  # ── Job 3: Update Homebrew tap ─────────────────────────────────────────────
   update-tap:
     name: Update Homebrew tap
-    needs: [source-tarball, bottle-arm64, publish-release]
+    needs: [source-tarball, bottle-arm64]
     runs-on: ubuntu-latest
 
     steps:
