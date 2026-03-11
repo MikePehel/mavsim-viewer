@@ -30,12 +30,13 @@ jobs:
         id: tarball
         run: |
           VERSION=${{ steps.version.outputs.version }}
-          tar czf mavsim-viewer-${VERSION}.tar.gz \
+          tar czf /tmp/mavsim-viewer-${VERSION}.tar.gz \
             --exclude='.git' \
             --exclude='tests/fixtures/*.ulg' \
             --exclude='build' \
             --transform="s,^\.,mavsim-viewer-${VERSION}," \
             .
+          mv /tmp/mavsim-viewer-${VERSION}.tar.gz .
           SHA=$(sha256sum mavsim-viewer-${VERSION}.tar.gz | awk '{print $1}')
           echo "sha256=${SHA}" >> "$GITHUB_OUTPUT"
           echo "Tarball SHA256: ${SHA}"
