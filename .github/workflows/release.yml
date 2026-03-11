@@ -86,7 +86,7 @@ jobs:
             depends_on \"cmake\" => :build
 
             def install
-              system \"cmake\", \"-S\", \".\", \"-B\", \"build\", \"-DCMAKE_BUILD_TYPE=Release\", *std_cmake_args
+              system \"cmake\", \"-S\", \".\", \"-B\", \"build\", \"-DCMAKE_BUILD_TYPE=Release\", \"-DHOMEBREW_ALLOW_FETCHCONTENT=ON\", *std_cmake_args
               system \"cmake\", \"--build\", \"build\"
               system \"cmake\", \"--install\", \"build\", \"--prefix\", prefix
             end
@@ -226,6 +226,7 @@ jobs:
             def install
               system \"cmake\", \"-S\", \".\", \"-B\", \"build\",
                      \"-DCMAKE_BUILD_TYPE=Release\",
+                     \"-DHOMEBREW_ALLOW_FETCHCONTENT=ON\",
                      *std_cmake_args
               system \"cmake\", \"--build\", \"build\"
               system \"cmake\", \"--install\", \"build\", \"--prefix\", prefix
