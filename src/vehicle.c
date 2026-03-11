@@ -167,19 +167,19 @@ static Color heat_to_color(float heat, unsigned char alpha, view_mode_t mode) {
     float cr, cg, cb;
 
     if (mode == VIEW_1988) {
-        // 1988: neon pink → hot magenta → red → orange → yellow → white
+        // 1988: purple → magenta → hot pink → orange → yellow → white
         if (heat < 0.16f) {
             float s = heat / 0.16f;
-            cr = 100 + 40 * s; cg = 10 * s; cb = 120 + 50 * s;
+            cr = 80 + 40 * s; cg = 10 * s; cb = 140 + 40 * s;
         } else if (heat < 0.33f) {
             float s = (heat - 0.16f) / 0.17f;
-            cr = 140 + 115 * s; cg = 10; cb = 170 - 70 * s;
+            cr = 120 + 80 * s; cg = 10; cb = 180 - 60 * s;
         } else if (heat < 0.5f) {
             float s = (heat - 0.33f) / 0.17f;
-            cr = 255; cg = 10 + 30 * s; cb = 100 - 100 * s;
+            cr = 200 + 55 * s; cg = 10 + 10 * s; cb = 120 - 120 * s;
         } else if (heat < 0.66f) {
             float s = (heat - 0.5f) / 0.16f;
-            cr = 255; cg = 40 + 130 * s; cb = 0;
+            cr = 255; cg = 20 + 150 * s; cb = 0;
         } else if (heat < 0.83f) {
             float s = (heat - 0.66f) / 0.17f;
             cr = 255; cg = 170 + 85 * s; cb = 50 * s;
