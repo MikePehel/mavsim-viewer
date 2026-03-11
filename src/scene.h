@@ -7,6 +7,7 @@
 typedef enum {
     CAM_MODE_CHASE = 0,
     CAM_MODE_FPV,
+    CAM_MODE_FREE,
     CAM_MODE_COUNT
 } camera_mode_t;
 

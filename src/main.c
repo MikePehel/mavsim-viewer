@@ -17,7 +17,8 @@
 #include "ortho_panel.h"
 #include "asset_path.h"
 
-#define MAX_VEHICLES 16
+#define MAX_VEHICLES 17
+#define MISSILE_COUNT 16
 
 static const Color vehicle_colors[MAX_VEHICLES] = {
     {230, 230, 230, 255}, // 0: white (default single)
@@ -36,7 +37,156 @@ static const Color vehicle_colors[MAX_VEHICLES] = {
     {255, 203, 164, 255}, // 13: peach
     {170, 255, 128, 255}, // 14: lime
     {200, 200, 200, 255}, // 15: silver
+    {255,  50,  50, 255}, // 16: target (red)
 };
+
+// ── Anime missile barrage simulation ────────────────────────────────────────
+// 16 drones launch from a near-single origin, arc outward in a spherical fan,
+// then heat-seek a VTOL target with oscillating sidewind for visual drama.
+typedef struct {
+    float theta;        // spherical azimuth of fan-out direction
+    float phi;          // spherical elevation of fan-out direction
+    float phase;        // oscillation phase offset (unique per missile)
+    float osc_freq;     // sidewind oscillation frequency
+    float osc_amp;      // sidewind amplitude
+    float arc_radius;   // how far it arcs out before seeking
+    float speed;        // base speed multiplier
+} missile_params_t;
+
+static void missile_barrage_init(missile_params_t params[MISSILE_COUNT]) {
+    for (int i = 0; i < MISSILE_COUNT; i++) {
+        // Distribute missiles in a spherical fan (golden angle spiral)
+        float golden = (float)M_PI * (3.0f - sqrtf(5.0f));
+        float y = 1.0f - ((float)i / (MISSILE_COUNT - 1)) * 1.4f; // -0.4 to 1.0
+        float radius_at_y = sqrtf(1.0f - y * y);
+        float angle = (float)i * golden;
+
+        params[i].theta = angle;
+        params[i].phi = asinf(y * 0.6f + 0.2f); // bias upward slightly
+        params[i].phase = (float)i * 0.7f + (float)i * (float)i * 0.03f;
+        params[i].osc_freq = 3.0f + (float)(i % 5) * 1.2f;
+        params[i].osc_amp = 1.5f + (float)(i % 3) * 0.8f;
+        params[i].arc_radius = 15.0f + (float)(i % 4) * 5.0f;
+        params[i].speed = 0.9f + (float)(i % 7) * 0.05f;
+    }
+}
+
+// Generate hil_state for a missile at time t (seconds)
+static void missile_barrage_state(const missile_params_t *p, float t,
+                                  Vector3 origin, Vector3 target,
+                                  hil_state_t *out_state)
+{
+    // Phase 1: fan out in spherical arc (0 to ~3s)
+    // Phase 2: seek target with oscillation (~3s onward)
+    float fan_duration = 2.5f * (1.0f / p->speed);
+    float seek_start = fan_duration;
+    float total_flight = seek_start + 6.0f; // converge over ~6s
+
+    if (t > total_flight) t = total_flight; // clamp
+
+    float progress = t / total_flight; // 0 to 1 overall
+
+    // Fan-out direction in world space
+    float ct = cosf(p->theta), st = sinf(p->theta);
+    float cp = cosf(p->phi), sp = sinf(p->phi);
+    Vector3 fan_dir = { ct * cp, sp, st * cp };
+
+    // Arc apex point
+    Vector3 apex = {
+        origin.x + fan_dir.x * p->arc_radius,
+        origin.y + fan_dir.y * p->arc_radius + 5.0f,
+        origin.z + fan_dir.z * p->arc_radius
+    };
+
+    Vector3 pos;
+    if (t < seek_start) {
+        // Phase 1: accelerating arc from origin toward apex
+        float u = t / seek_start;
+        float ease = u * u * (3.0f - 2.0f * u); // smoothstep
+        pos.x = origin.x + (apex.x - origin.x) * ease;
+        pos.y = origin.y + (apex.y - origin.y) * ease;
+        pos.z = origin.z + (apex.z - origin.z) * ease;
+    } else {
+        // Phase 2: curved seek from apex toward target
+        float u = (t - seek_start) / (total_flight - seek_start);
+        float ease = u * u * (3.0f - 2.0f * u); // smoothstep into target
+
+        pos.x = apex.x + (target.x - apex.x) * ease;
+        pos.y = apex.y + (target.y - apex.y) * ease;
+        pos.z = apex.z + (target.z - apex.z) * ease;
+    }
+
+    // Sidewind oscillation (perpendicular to travel direction)
+    Vector3 to_target = { target.x - pos.x, target.y - pos.y, target.z - pos.z };
+    float dist = sqrtf(to_target.x*to_target.x + to_target.y*to_target.y + to_target.z*to_target.z);
+    if (dist > 0.1f) {
+        to_target.x /= dist; to_target.y /= dist; to_target.z /= dist;
+    }
+    // Perpendicular vectors for oscillation
+    Vector3 up = {0, 1, 0};
+    Vector3 side = {
+        to_target.y * up.z - to_target.z * up.y,
+        to_target.z * up.x - to_target.x * up.z,
+        to_target.x * up.y - to_target.y * up.x
+    };
+    float slen = sqrtf(side.x*side.x + side.y*side.y + side.z*side.z);
+    if (slen > 0.001f) { side.x /= slen; side.y /= slen; side.z /= slen; }
+
+    Vector3 up2 = {
+        to_target.y * side.z - to_target.z * side.y,
+        to_target.z * side.x - to_target.x * side.z,
+        to_target.x * side.y - to_target.y * side.x
+    };
+
+    // Oscillation decays as missile approaches target
+    float decay = 1.0f - progress * progress;
+    float osc_h = sinf(t * p->osc_freq + p->phase) * p->osc_amp * decay;
+    float osc_v = cosf(t * p->osc_freq * 0.7f + p->phase * 1.3f) * p->osc_amp * 0.6f * decay;
+
+    pos.x += side.x * osc_h + up2.x * osc_v;
+    pos.y += side.y * osc_h + up2.y * osc_v;
+    pos.z += side.z * osc_h + up2.z * osc_v;
+
+    // Convert to lat/lon/alt for hil_state
+    // Use a simple NED offset: origin at (0,0,alt), position is meters offset
+    // We'll set lat/lon relative to a base and encode as degE7
+    double base_lat = 47.397742;
+    double base_lon = 8.545594;
+    double base_alt = 489.4;
+
+    double meters_per_deg_lat = 111132.0;
+    double meters_per_deg_lon = 111132.0 * cos(base_lat * M_PI / 180.0);
+
+    out_state->lat = (int32_t)((base_lat + (double)pos.z / meters_per_deg_lat) * 1e7);
+    out_state->lon = (int32_t)((base_lon + (double)pos.x / meters_per_deg_lon) * 1e7);
+    out_state->alt = (int32_t)((base_alt + (double)pos.y) * 1000.0);
+
+    // Velocity (finite difference approximation via direction)
+    float spd = 8.0f + progress * 15.0f; // accelerating
+    out_state->vx = (int16_t)(to_target.z * spd * 100.0f); // NED north = +Z in our coords
+    out_state->vy = (int16_t)(to_target.x * spd * 100.0f); // NED east = +X
+    out_state->vz = (int16_t)(-to_target.y * spd * 100.0f); // NED down = -Y
+    out_state->ind_airspeed = (uint16_t)(spd * 100.0f);
+    out_state->true_airspeed = out_state->ind_airspeed;
+
+    // Simple orientation: nose toward target
+    out_state->quaternion[0] = 1.0f;
+    out_state->quaternion[1] = 0.0f;
+    out_state->quaternion[2] = 0.0f;
+    out_state->quaternion[3] = 0.0f;
+    // Compute yaw quaternion from to_target
+    float yaw = atan2f(to_target.x, to_target.z);
+    float pitch = -asinf(to_target.y);
+    float cy = cosf(yaw * 0.5f), sy = sinf(yaw * 0.5f);
+    float cp2 = cosf(pitch * 0.5f), sp2 = sinf(pitch * 0.5f);
+    out_state->quaternion[0] = cy * cp2;
+    out_state->quaternion[1] = 0;
+    out_state->quaternion[2] = sy * cp2;
+    out_state->quaternion[3] = cy * sp2;
+
+    out_state->valid = true;
+    out_state->time_usec = (uint64_t)(t * 1e6);
+}
 
 static void print_usage(const char *prog) {
     printf("Usage: %s [options]\n", prog);
@@ -64,6 +214,7 @@ int main(int argc, char *argv[]) {
     double origin_alt = 489.4;
     bool origin_specified = false;
     const char *replay_file = NULL;
+    bool missile_mode = false;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-udp") == 0 && i + 1 < argc) {
@@ -91,6 +242,8 @@ int main(int argc, char *argv[]) {
             win_h = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--replay") == 0 && i + 1 < argc) {
             replay_file = argv[++i];
+        } else if (strcmp(argv[i], "-missile") == 0) {
+            missile_mode = true;
         } else if (strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -109,6 +262,15 @@ int main(int argc, char *argv[]) {
     memset(sources, 0, sizeof(sources));
     bool is_replay = (replay_file != NULL);
 
+    // Missile mode overrides vehicle count
+    missile_params_t missile_params[MISSILE_COUNT];
+    float missile_time = 0.0f;
+    if (missile_mode) {
+        vehicle_count = MISSILE_COUNT + 1; // 16 missiles + 1 target
+        missile_barrage_init(missile_params);
+        origin_specified = true; // force shared origin
+    }
+
     if (is_replay) {
         vehicle_count = 1;  // single vehicle replay (multi-file is future scope)
         if (data_source_ulog_create(&sources[0], replay_file) != 0) {
@@ -116,7 +278,7 @@ int main(int argc, char *argv[]) {
             CloseWindow();
             return 1;
         }
-    } else {
+    } else if (!missile_mode) {
         for (int i = 0; i < vehicle_count; i++) {
             if (data_source_mavlink_create(&sources[i], base_port + i, (uint8_t)i, debug) != 0) {
                 fprintf(stderr, "Failed to init MAVLink receiver on port %u\n", base_port + i);
@@ -132,9 +294,19 @@ int main(int argc, char *argv[]) {
     scene_init(&scene);
 
     vehicle_t vehicles[MAX_VEHICLES];
-    for (int i = 0; i < vehicle_count; i++) {
-        vehicle_init(&vehicles[i], model_idx, scene.lighting_shader);
-        vehicles[i].color = vehicle_colors[i];
+    if (missile_mode) {
+        // Missiles: FPV quads, target: VTOL
+        for (int i = 0; i < MISSILE_COUNT; i++) {
+            vehicle_init(&vehicles[i], MODEL_FPV_QUAD, scene.lighting_shader);
+            vehicles[i].color = vehicle_colors[i];
+        }
+        vehicle_init(&vehicles[MISSILE_COUNT], MODEL_VTOL, scene.lighting_shader);
+        vehicles[MISSILE_COUNT].color = vehicle_colors[MISSILE_COUNT];
+    } else {
+        for (int i = 0; i < vehicle_count; i++) {
+            vehicle_init(&vehicles[i], model_idx, scene.lighting_shader);
+            vehicles[i].color = vehicle_colors[i];
+        }
     }
 
     // For multi-vehicle or explicit origin: pre-set the NED origin on all vehicles
@@ -169,11 +341,81 @@ int main(int argc, char *argv[]) {
     int trail_mode = 1;              // 0=off, 1=directional trail, 2=speed ribbon
     bool show_ground_track = false;  // ground projection off by default
     bool classic_colors = false;     // L key: toggle classic (red/blue) vs modern (yellow/purple)
+    bool missile_paused = false;
 
     // Main loop
     while (!WindowShouldClose()) {
+        // Missile mode controls
+        if (missile_mode) {
+            if (IsKeyPressed(KEY_SPACE)) missile_paused = !missile_paused;
+        }
+
+        // Missile barrage: generate synthetic flight data
+        if (missile_mode) {
+            float dt = missile_paused ? 0.0f : GetFrameTime();
+            missile_time += dt;
+
+            // Loop the animation
+            float total_anim = 10.0f;
+            if (missile_time > total_anim) {
+                missile_time = 0.0f;
+                for (int i = 0; i < vehicle_count; i++)
+                    vehicle_reset_trail(&vehicles[i]);
+            }
+
+            Vector3 launch = { 0.0f, 15.0f, 0.0f };
+            Vector3 target_center = { 40.0f, 20.0f, 30.0f };
+
+            // Compute target VTOL's actual position (slow orbit)
+            float tgt_a = missile_time * 0.3f;
+            Vector3 target = {
+                target_center.x + cosf(tgt_a) * 3.0f,
+                target_center.y + sinf(missile_time * 0.5f) * 1.0f,
+                target_center.z + sinf(tgt_a) * 3.0f
+            };
+
+            // Update missiles — they track the VTOL's live position
+            for (int i = 0; i < MISSILE_COUNT; i++) {
+                float t = missile_time - (float)i * 0.05f;
+                if (t < 0.0f) t = 0.0f;
+
+                hil_state_t state = {0};
+                missile_barrage_state(&missile_params[i], t, launch, target, &state);
+                vehicle_update(&vehicles[i], &state, NULL);
+                vehicles[i].active = true;
+            }
+
+            // Target VTOL state
+            {
+                hil_state_t tgt_state = {0};
+                float tx = target.x;
+                float tz = target.z;
+                float ty = target.y;
+
+                double base_lat = 47.397742;
+                double base_lon = 8.545594;
+                double base_alt = 489.4;
+                double meters_per_deg_lat = 111132.0;
+                double meters_per_deg_lon = 111132.0 * cos(base_lat * M_PI / 180.0);
+
+                tgt_state.lat = (int32_t)((base_lat + (double)tz / meters_per_deg_lat) * 1e7);
+                tgt_state.lon = (int32_t)((base_lon + (double)tx / meters_per_deg_lon) * 1e7);
+                tgt_state.alt = (int32_t)((base_alt + (double)ty) * 1000.0);
+                tgt_state.vx = 0; tgt_state.vy = 0; tgt_state.vz = 0;
+                tgt_state.quaternion[0] = cosf(tgt_a * 0.5f);
+                tgt_state.quaternion[1] = 0;
+                tgt_state.quaternion[2] = sinf(tgt_a * 0.5f);
+                tgt_state.quaternion[3] = 0;
+                tgt_state.valid = true;
+                tgt_state.time_usec = (uint64_t)(missile_time * 1e6);
+
+                vehicle_update(&vehicles[MISSILE_COUNT], &tgt_state, NULL);
+                vehicles[MISSILE_COUNT].active = true;
+            }
+        }
+
         // Poll all data sources and update vehicles
-        for (int i = 0; i < vehicle_count; i++) {
+        for (int i = 0; i < vehicle_count && !missile_mode; i++) {
             data_source_poll(&sources[i], GetFrameTime());
 
             // Reset trail and origin on reconnect

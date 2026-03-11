@@ -401,6 +401,38 @@ void scene_update_camera(scene_t *s, Vector3 vehicle_pos, Quaternion vehicle_rot
         case CAM_MODE_FPV:
             update_fpv_camera(s, vehicle_pos, vehicle_rot);
             break;
+        case CAM_MODE_FREE: {
+            // Custom free camera: WASD forward/back/strafe, Q down, E up, right-click mouse look
+            float dt = GetFrameTime();
+            float speed = 20.0f * dt;
+
+            // Forward direction (horizontal)
+            Vector3 forward = Vector3Normalize(Vector3Subtract(s->camera.target, s->camera.position));
+            Vector3 right = Vector3Normalize(Vector3CrossProduct(forward, s->camera.up));
+
+            // WASD movement
+            if (IsKeyDown(KEY_W)) { s->camera.position = Vector3Add(s->camera.position, Vector3Scale(forward, speed)); s->camera.target = Vector3Add(s->camera.target, Vector3Scale(forward, speed)); }
+            if (IsKeyDown(KEY_S)) { s->camera.position = Vector3Add(s->camera.position, Vector3Scale(forward, -speed)); s->camera.target = Vector3Add(s->camera.target, Vector3Scale(forward, -speed)); }
+            if (IsKeyDown(KEY_D)) { s->camera.position = Vector3Add(s->camera.position, Vector3Scale(right, speed)); s->camera.target = Vector3Add(s->camera.target, Vector3Scale(right, speed)); }
+            if (IsKeyDown(KEY_A)) { s->camera.position = Vector3Add(s->camera.position, Vector3Scale(right, -speed)); s->camera.target = Vector3Add(s->camera.target, Vector3Scale(right, -speed)); }
+            if (IsKeyDown(KEY_E)) { s->camera.position.y += speed; s->camera.target.y += speed; }
+            if (IsKeyDown(KEY_Q)) { s->camera.position.y -= speed; s->camera.target.y -= speed; }
+
+            // Mouse look (any click held)
+            if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) || IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
+                Vector2 delta = GetMouseDelta();
+                float sensitivity = 0.003f;
+                // Yaw (rotate around world up)
+                Matrix yaw = MatrixRotate((Vector3){0,1,0}, -delta.x * sensitivity);
+                // Pitch (rotate around camera right)
+                Matrix pitch = MatrixRotate(right, -delta.y * sensitivity);
+                Vector3 dir = Vector3Subtract(s->camera.target, s->camera.position);
+                dir = Vector3Transform(dir, yaw);
+                dir = Vector3Transform(dir, pitch);
+                s->camera.target = Vector3Add(s->camera.position, dir);
+            }
+            break;
+        }
         default:
             break;
     }
@@ -431,7 +463,7 @@ void scene_handle_input(scene_t *s) {
     if (IsKeyPressed(KEY_C)) {
         s->ortho_mode = ORTHO_NONE;  // return to perspective on camera toggle
         s->cam_mode = (s->cam_mode + 1) % CAM_MODE_COUNT;
-        const char *names[] = {"Chase", "FPV"};
+        const char *names[] = {"Chase", "FPV", "Free"};
         printf("Camera: %s\n", names[s->cam_mode]);
 
         s->camera.up = (Vector3){0, 1, 0};
