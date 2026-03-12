@@ -73,11 +73,13 @@ typedef struct {
     float *trail_pitch;          // pitch angle at each trail sample
     float *trail_vert;           // vertical speed at each trail sample
     float *trail_speed;          // 3D speed (m/s) at each trail sample
+    float *trail_time;           // replay timestamp (seconds) at each trail sample
     float trail_speed_max;       // max speed seen so far (for adaptive ribbon)
     int trail_count;
     int trail_head;
     int trail_capacity;
     float trail_timer;
+    float current_time;          // set externally: current replay position (seconds)
     Vector3 trail_last_dir;  // direction of last recorded segment (for adaptive sampling)
     Shader lighting_shader;  // shared lighting shader (id=0 if none)
     int loc_matNormal;       // shader uniform for normal matrix
@@ -85,6 +87,9 @@ typedef struct {
 
 // Initialize vehicle state and load the model at model_idx. shader is optional lighting shader (id=0 to skip).
 void vehicle_init(vehicle_t *v, int model_idx, Shader lighting_shader);
+
+// Initialize with custom trail capacity (for replay persistent trails).
+void vehicle_init_ex(vehicle_t *v, int model_idx, Shader lighting_shader, int trail_capacity);
 
 // Swap to a different model at runtime (unloads old, loads new).
 void vehicle_load_model(vehicle_t *v, int model_idx);
@@ -107,6 +112,18 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
 
 // Reset the path trail.
 void vehicle_reset_trail(vehicle_t *v);
+
+// Truncate trail to only include points at or before the given time.
+void vehicle_truncate_trail(vehicle_t *v, float time_s);
+
+// Draw frame marker spheres (call inside BeginMode3D).
+void vehicle_draw_markers(Vector3 *positions, char labels[][48], int count,
+                          int current_marker, Vector3 cam_pos, Camera3D camera);
+
+// Draw billboarded marker labels (call AFTER EndMode3D, in 2D pass).
+void vehicle_draw_marker_labels(Vector3 *positions, char labels[][48], int count,
+                                int current_marker, Vector3 cam_pos, Camera3D camera,
+                                Font font_label, Font font_value);
 
 // Unload model resources.
 void vehicle_cleanup(vehicle_t *v);

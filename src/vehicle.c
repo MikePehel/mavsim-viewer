@@ -261,7 +261,7 @@ static Color heat_to_color(float heat, unsigned char alpha, view_mode_t mode) {
 }
 
 // ── Init / update / draw ────────────────────────────────────────────────────
-void vehicle_init(vehicle_t *v, int model_idx, Shader lighting_shader) {
+static void vehicle_init_common(vehicle_t *v, int model_idx, Shader lighting_shader, int capacity) {
     memset(v, 0, sizeof(*v));
     v->position = (Vector3){0};
     v->rotation = QuaternionIdentity();
@@ -272,12 +272,13 @@ void vehicle_init(vehicle_t *v, int model_idx, Shader lighting_shader) {
     v->front_material_idx = -1;
     v->back_material_idx = -1;
     v->color = WHITE;
-    v->trail = (Vector3 *)calloc(TRAIL_MAX, sizeof(Vector3));
-    v->trail_roll = (float *)calloc(TRAIL_MAX, sizeof(float));
-    v->trail_pitch = (float *)calloc(TRAIL_MAX, sizeof(float));
-    v->trail_vert = (float *)calloc(TRAIL_MAX, sizeof(float));
-    v->trail_speed = (float *)calloc(TRAIL_MAX, sizeof(float));
-    v->trail_capacity = TRAIL_MAX;
+    v->trail = (Vector3 *)calloc(capacity, sizeof(Vector3));
+    v->trail_roll = (float *)calloc(capacity, sizeof(float));
+    v->trail_pitch = (float *)calloc(capacity, sizeof(float));
+    v->trail_vert = (float *)calloc(capacity, sizeof(float));
+    v->trail_speed = (float *)calloc(capacity, sizeof(float));
+    v->trail_time = (float *)calloc(capacity, sizeof(float));
+    v->trail_capacity = capacity;
     v->trail_count = 0;
     v->trail_head = 0;
     v->trail_timer = 0.0f;
@@ -290,6 +291,14 @@ void vehicle_init(vehicle_t *v, int model_idx, Shader lighting_shader) {
     }
 
     vehicle_load_model(v, model_idx);
+}
+
+void vehicle_init(vehicle_t *v, int model_idx, Shader lighting_shader) {
+    vehicle_init_common(v, model_idx, lighting_shader, TRAIL_MAX);
+}
+
+void vehicle_init_ex(vehicle_t *v, int model_idx, Shader lighting_shader, int trail_capacity) {
+    vehicle_init_common(v, model_idx, lighting_shader, trail_capacity);
 }
 
 void vehicle_update(vehicle_t *v, const hil_state_t *state, const home_position_t *home) {
@@ -409,6 +418,7 @@ void vehicle_update(vehicle_t *v, const hil_state_t *state, const home_position_
         v->trail_roll[v->trail_head] = v->roll_deg;
         v->trail_pitch[v->trail_head] = v->pitch_deg;
         v->trail_vert[v->trail_head] = v->vertical_speed;
+        v->trail_time[v->trail_head] = v->current_time;
         float spd = sqrtf(v->ground_speed * v->ground_speed +
                           v->vertical_speed * v->vertical_speed);
         v->trail_speed[v->trail_head] = spd;
@@ -854,6 +864,114 @@ void vehicle_reset_trail(vehicle_t *v) {
     v->trail_speed_max = 0.0f;
 }
 
+void vehicle_truncate_trail(vehicle_t *v, float time_s) {
+    if (v->trail_count == 0) return;
+
+    // Trail is written linearly when count < capacity (replay persistent trail).
+    // Find the last point with trail_time <= time_s.
+    int keep = 0;
+    if (v->trail_count <= v->trail_capacity) {
+        // Linear scan from start (points are chronological in non-wrapped case)
+        int start = (v->trail_head - v->trail_count + v->trail_capacity) % v->trail_capacity;
+        for (int i = 0; i < v->trail_count; i++) {
+            int idx = (start + i) % v->trail_capacity;
+            if (v->trail_time[idx] <= time_s + 0.001f)
+                keep = i + 1;
+            else
+                break;
+        }
+    }
+
+    if (keep < v->trail_count) {
+        int start = (v->trail_head - v->trail_count + v->trail_capacity) % v->trail_capacity;
+        v->trail_count = keep;
+        v->trail_head = (start + keep) % v->trail_capacity;
+        v->trail_timer = 0.0f;
+
+        // Recompute speed max
+        float mx = 0.0f;
+        for (int i = 0; i < v->trail_count; i++) {
+            int idx = (start + i) % v->trail_capacity;
+            if (v->trail_speed[idx] > mx) mx = v->trail_speed[idx];
+        }
+        v->trail_speed_max = mx;
+    }
+}
+
+void vehicle_draw_markers(Vector3 *positions, char labels[][48], int count,
+                          int current_marker, Vector3 cam_pos, Camera3D camera) {
+    (void)labels; (void)camera;  // used by vehicle_draw_marker_labels (2D pass)
+    for (int i = 0; i < count; i++) {
+        Vector3 p = positions[i];
+        float dx = p.x - cam_pos.x, dy = p.y - cam_pos.y, dz = p.z - cam_pos.z;
+        float dist = sqrtf(dx*dx + dy*dy + dz*dz);
+        float radius = 0.05f + dist * 0.001f;
+
+        bool is_current = (i == current_marker);
+        Color col = is_current ? (Color){0, 255, 255, 230} : (Color){255, 160, 40, 200};
+
+        DrawSphere(p, radius, col);
+        DrawLine3D(p, (Vector3){p.x, 0.0f, p.z}, (Color){col.r, col.g, col.b, 80});
+    }
+}
+
+// Call AFTER EndMode3D — renders billboarded labels as 2D screen-space text
+void vehicle_draw_marker_labels(Vector3 *positions, char labels[][48], int count,
+                                int current_marker, Vector3 cam_pos, Camera3D camera,
+                                Font font_label, Font font_value) {
+    // Camera forward vector for behind-camera culling
+    Vector3 cam_fwd = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+
+    float sh = (float)GetScreenHeight();
+    float sw = (float)GetScreenWidth();
+    float s = powf(sh / 720.0f, 0.7f);
+
+    for (int i = 0; i < count; i++) {
+        Vector3 p = positions[i];
+        float dx = p.x - cam_pos.x, dy = p.y - cam_pos.y, dz = p.z - cam_pos.z;
+        float dist = sqrtf(dx*dx + dy*dy + dz*dz);
+        float radius = 0.05f + dist * 0.001f;
+
+        // Skip if behind camera
+        Vector3 to_marker = {dx, dy, dz};
+        float dot = to_marker.x * cam_fwd.x + to_marker.y * cam_fwd.y + to_marker.z * cam_fwd.z;
+        if (dot < 0.0f) continue;
+
+        bool is_current = (i == current_marker);
+
+        char display[64];
+        if (labels[i][0] != '\0')
+            snprintf(display, sizeof(display), "%d: %s", i + 1, labels[i]);
+        else
+            snprintf(display, sizeof(display), "%d", i + 1);
+
+        Vector2 screen = GetWorldToScreen(
+            (Vector3){p.x, p.y + radius * 3.0f, p.z}, camera);
+
+        // Skip if off screen
+        if (screen.x < -50 || screen.x > sw + 50 ||
+            screen.y < -50 || screen.y > sh + 50) continue;
+
+        // Use HUD fonts: index number in mono, label text in label font
+        float fs = (is_current ? 18 : 15) * s;
+        Vector2 tw = MeasureTextEx(font_value, display, fs, 0.5f);
+        float pad_x = 8 * s, pad_y = 5 * s;
+
+        float rx = screen.x - tw.x / 2 - pad_x;
+        float ry = screen.y - tw.y / 2 - pad_y;
+        float rw = tw.x + pad_x * 2;
+        float rh = tw.y + pad_y * 2;
+
+        DrawRectangleRounded(
+            (Rectangle){rx, ry, rw, rh},
+            0.3f, 6, (Color){12, 14, 18, 200});
+        Color text_col = is_current ? (Color){0, 255, 255, 255} : (Color){255, 200, 100, 255};
+        DrawTextEx(font_value, display,
+                   (Vector2){screen.x - tw.x / 2, screen.y - tw.y / 2},
+                   fs, 0.5f, text_col);
+    }
+}
+
 void vehicle_cleanup(vehicle_t *v) {
     UnloadModel(v->model);
     free(v->trail);
@@ -861,9 +979,11 @@ void vehicle_cleanup(vehicle_t *v) {
     free(v->trail_pitch);
     free(v->trail_vert);
     free(v->trail_speed);
+    free(v->trail_time);
     v->trail = NULL;
     v->trail_roll = NULL;
     v->trail_pitch = NULL;
     v->trail_vert = NULL;
     v->trail_speed = NULL;
+    v->trail_time = NULL;
 }

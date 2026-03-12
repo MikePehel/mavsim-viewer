@@ -350,7 +350,9 @@ static void draw_secondary_row(const hud_t *h, const vehicle_t *pv, int pidx,
 void hud_draw(const hud_t *h, const vehicle_t *vehicles,
               const data_source_t *sources, int vehicle_count,
               int selected, int screen_w, int screen_h, view_mode_t view_mode,
-              bool is_underwater) {
+              bool is_underwater,
+              const float *marker_times_arr, const char (*marker_labels_arr)[48],
+              int marker_count_in, int current_marker_in) {
 
     bool rez = (view_mode == VIEW_REZ);
     bool synth = (view_mode == VIEW_1988);
@@ -526,6 +528,49 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
                                (Vector2){lx, prog_y - tw.y - 2 * s},
                                fs_marker, 0.5f, tick_col);
                     last_label_x = mx;
+                }
+            }
+        }
+
+        // Frame markers on timeline (cyan diamonds with labels)
+        if (marker_times_arr && marker_count_in > 0 && pb->duration_s > 0.0f) {
+            float fs_mlabel = 9 * s;
+            float last_mlabel_x = -100.0f;
+            for (int i = 0; i < marker_count_in; i++) {
+                float t = marker_times_arr[i] / pb->duration_s;
+                if (t < 0.0f || t > 1.0f) continue;
+                float mx = prog_x + prog_w * t;
+                float my = prog_y + prog_h / 2.0f;
+
+                bool is_cur = (i == current_marker_in);
+                Color mc = is_cur ? (Color){0, 255, 255, 255} : (Color){255, 160, 40, 220};
+
+                // Diamond shape
+                float d = 3.5f * s;
+                Vector2 diamond[4] = {
+                    {mx, my - d},     // top
+                    {mx + d, my},     // right
+                    {mx, my + d},     // bottom
+                    {mx - d, my},     // left
+                };
+                DrawTriangle(diamond[0], diamond[3], diamond[1], mc);
+                DrawTriangle(diamond[1], diamond[3], diamond[2], mc);
+
+                // Label below timeline (skip if too close to previous)
+                if (mx - last_mlabel_x > 30 * s) {
+                    char mlbl[56];
+                    if (marker_labels_arr && marker_labels_arr[i][0] != '\0')
+                        snprintf(mlbl, sizeof(mlbl), "%d:%s", i + 1, marker_labels_arr[i]);
+                    else
+                        snprintf(mlbl, sizeof(mlbl), "%d", i + 1);
+                    Vector2 mlw = MeasureTextEx(h->font_label, mlbl, fs_mlabel, 0.5f);
+                    float lx = mx - mlw.x / 2.0f;
+                    if (lx < prog_x) lx = prog_x;
+                    if (lx + mlw.x > prog_x + prog_w) lx = prog_x + prog_w - mlw.x;
+                    DrawTextEx(h->font_label, mlbl,
+                               (Vector2){lx, prog_y + prog_h + 3 * s},
+                               fs_mlabel, 0.5f, mc);
+                    last_mlabel_x = mx;
                 }
             }
         }
@@ -851,10 +896,18 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
             {NULL,          "REPLAY"},
             {"Space",       "Pause / resume"},
             {"+/-",         "Playback speed"},
-            {"<-/->",       "Seek 5s (Shift: 30s)"},
+            {"<-/->",       "Seek 5s"},
+            {"Sh+<-/->",    "Frame step"},
+            {"Ctrl+Sh+<->", "Seek 1s"},
             {"L",           "Toggle loop"},
             {"I",           "Interpolation"},
             {"R",           "Restart"},
+            {NULL,          "MARKERS"},
+            {"B",           "Drop marker"},
+            {"B then L",    "Drop + label marker"},
+            {"Sh+B",        "Delete current marker"},
+            {"[ / ]",       "Jump to prev / next marker"},
+            {"Sh+[ / ]",    "Fly camera to marker"},
         };
 
         int left_count = sizeof(left_col) / sizeof(left_col[0]);
