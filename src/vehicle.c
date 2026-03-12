@@ -898,8 +898,98 @@ void vehicle_truncate_trail(vehicle_t *v, float time_s) {
     }
 }
 
+Color vehicle_marker_color(float roll, float pitch, float vert, float speed,
+                           float speed_max, view_mode_t view_mode, int trail_mode) {
+    if (trail_mode == 2) {
+        // Speed-heat color
+        float ms = speed_max > 1.0f ? speed_max : 1.0f;
+        float heat = speed / ms;
+        if (heat > 1.0f) heat = 1.0f;
+        if (heat < 0.0f) heat = 0.0f;
+        return heat_to_color(heat, 255, view_mode);
+    }
+    // Directional trail color (same blending as trail mode 1)
+    Color trail_color;
+    Color col_back, col_up, col_down, col_roll_pos, col_roll_neg;
+    if (view_mode == VIEW_SNOW) {
+        trail_color  = (Color){ 200, 140,  20, 255 };
+        col_back     = (Color){ 140,  20, 200, 255 };
+        col_up       = (Color){   0, 150,  60, 255 };
+        col_down     = (Color){ 200,  50,   0, 255 };
+        col_roll_pos = (Color){  20, 160,  40, 255 };
+        col_roll_neg = (Color){ 200,  20,  60, 255 };
+    } else if (view_mode == VIEW_1988) {
+        trail_color  = (Color){ 255, 220,  60, 255 };
+        col_back     = (Color){ 180,  40, 255, 255 };
+        col_up       = (Color){   0, 240, 255, 255 };
+        col_down     = (Color){ 255, 140,   0, 255 };
+        col_roll_pos = (Color){  40, 255,  80, 255 };
+        col_roll_neg = (Color){ 255,  40,  80, 255 };
+    } else if (view_mode == VIEW_REZ) {
+        trail_color  = (Color){ 220, 180,  30, 255 };
+        col_back     = (Color){ 160,  40, 240, 255 };
+        col_up       = (Color){   0, 200, 255, 255 };
+        col_down     = (Color){ 255, 160,   0, 255 };
+        col_roll_pos = (Color){  40, 255, 100, 255 };
+        col_roll_neg = (Color){ 255,  40,  80, 255 };
+    } else {
+        trail_color  = (Color){ 255, 200,  50, 255 };
+        col_back     = (Color){ 160,  60, 255, 255 };
+        col_up       = (Color){   0, 220, 255, 255 };
+        col_down     = (Color){ 255, 140,   0, 255 };
+        col_roll_pos = (Color){  40, 255,  80, 255 };
+        col_roll_neg = (Color){ 255,  40,  80, 255 };
+    }
+
+    float cr = (float)trail_color.r, cg = (float)trail_color.g, cb = (float)trail_color.b;
+
+    float back_t = pitch / 15.0f;
+    if (back_t < 0.0f) back_t = 0.0f;
+    if (back_t > 1.0f) back_t = 1.0f;
+    cr += (col_back.r - cr) * back_t;
+    cg += (col_back.g - cg) * back_t;
+    cb += (col_back.b - cb) * back_t;
+
+    float vert_t = vert / 5.0f;
+    if (vert_t > 1.0f) vert_t = 1.0f;
+    if (vert_t < -1.0f) vert_t = -1.0f;
+    if (vert_t > 0.0f) {
+        cr += (col_up.r - cr) * vert_t;
+        cg += (col_up.g - cg) * vert_t;
+        cb += (col_up.b - cb) * vert_t;
+    } else if (vert_t < 0.0f) {
+        float dt2 = -vert_t;
+        cr += (col_down.r - cr) * dt2;
+        cg += (col_down.g - cg) * dt2;
+        cb += (col_down.b - cb) * dt2;
+    }
+
+    float roll_t = roll / 15.0f;
+    if (roll_t > 1.0f) roll_t = 1.0f;
+    if (roll_t < -1.0f) roll_t = -1.0f;
+    if (roll_t > 0.0f) {
+        cr += (col_roll_pos.r - cr) * roll_t * 0.7f;
+        cg += (col_roll_pos.g - cg) * roll_t * 0.7f;
+        cb += (col_roll_pos.b - cb) * roll_t * 0.7f;
+    } else if (roll_t < 0.0f) {
+        float rt = -roll_t;
+        cr += (col_roll_neg.r - cr) * rt * 0.7f;
+        cg += (col_roll_neg.g - cg) * rt * 0.7f;
+        cb += (col_roll_neg.b - cb) * rt * 0.7f;
+    }
+
+    return (Color){
+        (unsigned char)(cr > 255 ? 255 : (cr < 0 ? 0 : cr)),
+        (unsigned char)(cg > 255 ? 255 : (cg < 0 ? 0 : cg)),
+        (unsigned char)(cb > 255 ? 255 : (cb < 0 ? 0 : cb)),
+        255
+    };
+}
+
 void vehicle_draw_markers(Vector3 *positions, char labels[][48], int count,
-                          int current_marker, Vector3 cam_pos, Camera3D camera) {
+                          int current_marker, Vector3 cam_pos, Camera3D camera,
+                          float *m_roll, float *m_pitch, float *m_vert, float *m_speed,
+                          float speed_max, view_mode_t view_mode, int trail_mode) {
     (void)labels; (void)camera;  // used by vehicle_draw_marker_labels (2D pass)
     for (int i = 0; i < count; i++) {
         Vector3 p = positions[i];
@@ -908,17 +998,41 @@ void vehicle_draw_markers(Vector3 *positions, char labels[][48], int count,
         float radius = 0.05f + dist * 0.001f;
 
         bool is_current = (i == current_marker);
-        Color col = is_current ? (Color){0, 255, 255, 230} : (Color){255, 160, 40, 200};
 
-        DrawSphere(p, radius, col);
+        Color col = vehicle_marker_color(m_roll[i], m_pitch[i], m_vert[i], m_speed[i],
+                                         speed_max, view_mode, trail_mode);
+
+        if (is_current) {
+            if (view_mode == VIEW_SNOW) {
+                col.r = (unsigned char)(col.r * 0.55f);
+                col.g = (unsigned char)(col.g * 0.55f);
+                col.b = (unsigned char)(col.b * 0.55f);
+            } else {
+                col.r = (unsigned char)(col.r + (230 - col.r) * 0.7f);
+                col.g = (unsigned char)(col.g + (230 - col.g) * 0.7f);
+                col.b = (unsigned char)(col.b + (230 - col.b) * 0.7f);
+            }
+        }
+        col.a = is_current ? 240 : 210;
+
+        DrawSphere(p, is_current ? radius * 1.4f : radius, col);
         DrawLine3D(p, (Vector3){p.x, 0.0f, p.z}, (Color){col.r, col.g, col.b, 80});
+
+        if (is_current) {
+            // Ring around selected marker — billboard facing camera
+            float ring_r = radius * 2.5f;
+            Color ring_col = {col.r, col.g, col.b, 200};
+            DrawCircle3D(p, ring_r, Vector3Subtract(cam_pos, p), 0.0f, ring_col);
+        }
     }
 }
 
 // Call AFTER EndMode3D — renders billboarded labels as 2D screen-space text
 void vehicle_draw_marker_labels(Vector3 *positions, char labels[][48], int count,
                                 int current_marker, Vector3 cam_pos, Camera3D camera,
-                                Font font_label, Font font_value) {
+                                Font font_label, Font font_value,
+                                float *m_roll, float *m_pitch, float *m_vert, float *m_speed,
+                                float speed_max, view_mode_t view_mode, int trail_mode) {
     // Camera forward vector for behind-camera culling
     Vector3 cam_fwd = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
 
@@ -962,10 +1076,190 @@ void vehicle_draw_marker_labels(Vector3 *positions, char labels[][48], int count
         float rw = tw.x + pad_x * 2;
         float rh = tw.y + pad_y * 2;
 
+        Color text_col = vehicle_marker_color(m_roll[i], m_pitch[i], m_vert[i], m_speed[i],
+                                              speed_max, view_mode, trail_mode);
+        if (is_current) {
+            if (view_mode == VIEW_SNOW) {
+                // Boost saturation: darken toward pure color (away from grey)
+                text_col.r = (unsigned char)(text_col.r * 0.55f);
+                text_col.g = (unsigned char)(text_col.g * 0.55f);
+                text_col.b = (unsigned char)(text_col.b * 0.55f);
+            } else {
+                text_col.r = (unsigned char)(text_col.r + (230 - text_col.r) * 0.7f);
+                text_col.g = (unsigned char)(text_col.g + (230 - text_col.g) * 0.7f);
+                text_col.b = (unsigned char)(text_col.b + (230 - text_col.b) * 0.7f);
+            }
+        }
+        text_col.a = 255;
+
+        // View-mode-aware label background
+        Color label_bg, label_border;
+        if (view_mode == VIEW_SNOW) {
+            label_bg = (Color){220, 222, 226, 220};
+            label_border = (Color){15, 15, 20, 100};
+        } else if (view_mode == VIEW_1988) {
+            label_bg = (Color){5, 5, 16, 210};
+            label_border = (Color){55, 55, 160, (unsigned char)(180 + 60 * sinf((float)i * 1.7f + (float)GetTime() * 3.0f))};
+        } else if (view_mode == VIEW_REZ) {
+            label_bg = (Color){8, 8, 12, 210};
+            label_border = (Color){text_col.r, text_col.g, text_col.b, 140};
+        } else {
+            label_bg = (Color){10, 14, 20, 255};
+            label_border = (Color){0, 0, 0, 0};
+        }
+
         DrawRectangleRounded(
             (Rectangle){rx, ry, rw, rh},
-            0.3f, 6, (Color){12, 14, 18, 200});
-        Color text_col = is_current ? (Color){0, 255, 255, 255} : (Color){255, 200, 100, 255};
+            0.3f, 6, label_bg);
+        DrawRectangleRoundedLinesEx(
+            (Rectangle){rx, ry, rw, rh},
+            0.3f, 6, 1.0f, label_border);
+        DrawTextEx(font_value, display,
+                   (Vector2){screen.x - tw.x / 2, screen.y - tw.y / 2},
+                   fs, 0.5f, text_col);
+    }
+}
+
+// ── System marker drawing (cubes + squares) ────────────────────────────────
+
+void vehicle_draw_sys_markers(Vector3 *positions, char labels[][48], int count,
+                              int current_marker, Vector3 cam_pos,
+                              float *m_roll, float *m_pitch, float *m_vert, float *m_speed,
+                              float speed_max, view_mode_t view_mode, int trail_mode) {
+    (void)labels;
+    for (int i = 0; i < count; i++) {
+        Vector3 p = positions[i];
+        float dx = p.x - cam_pos.x, dy = p.y - cam_pos.y, dz = p.z - cam_pos.z;
+        float dist = sqrtf(dx*dx + dy*dy + dz*dz);
+        float size = (0.05f + dist * 0.001f) * 2.0f * 0.9f;
+
+        bool is_current = (i == current_marker);
+
+        Color col = vehicle_marker_color(m_roll[i], m_pitch[i], m_vert[i], m_speed[i],
+                                         speed_max, view_mode, trail_mode);
+
+        if (is_current) {
+            if (view_mode == VIEW_SNOW) {
+                col.r = (unsigned char)(col.r * 0.55f);
+                col.g = (unsigned char)(col.g * 0.55f);
+                col.b = (unsigned char)(col.b * 0.55f);
+            } else {
+                col.r = (unsigned char)(col.r + (230 - col.r) * 0.7f);
+                col.g = (unsigned char)(col.g + (230 - col.g) * 0.7f);
+                col.b = (unsigned char)(col.b + (230 - col.b) * 0.7f);
+            }
+        }
+        col.a = is_current ? 240 : 210;
+
+        float cs = is_current ? size * 1.4f : size;
+        DrawCube(p, cs, cs, cs, col);
+        DrawLine3D(p, (Vector3){p.x, 0.0f, p.z}, (Color){col.r, col.g, col.b, 60});
+
+        if (is_current) {
+            // Square indicator around selected cube — billboard facing camera
+            // Draw 4 lines forming a square in camera-facing plane
+            Vector3 fwd = Vector3Normalize(Vector3Subtract(cam_pos, p));
+            Vector3 up = {0, 1, 0};
+            Vector3 right = Vector3Normalize(Vector3CrossProduct(up, fwd));
+            Vector3 cam_up = Vector3CrossProduct(fwd, right);
+            float sq = size * 2.5f;
+            Color sq_col = {col.r, col.g, col.b, 200};
+
+            Vector3 tl = {p.x + (-right.x + cam_up.x) * sq, p.y + (-right.y + cam_up.y) * sq, p.z + (-right.z + cam_up.z) * sq};
+            Vector3 tr = {p.x + ( right.x + cam_up.x) * sq, p.y + ( right.y + cam_up.y) * sq, p.z + ( right.z + cam_up.z) * sq};
+            Vector3 br = {p.x + ( right.x - cam_up.x) * sq, p.y + ( right.y - cam_up.y) * sq, p.z + ( right.z - cam_up.z) * sq};
+            Vector3 bl = {p.x + (-right.x - cam_up.x) * sq, p.y + (-right.y - cam_up.y) * sq, p.z + (-right.z - cam_up.z) * sq};
+
+            DrawLine3D(tl, tr, sq_col);
+            DrawLine3D(tr, br, sq_col);
+            DrawLine3D(br, bl, sq_col);
+            DrawLine3D(bl, tl, sq_col);
+        }
+    }
+}
+
+void vehicle_draw_sys_marker_labels(Vector3 *positions, char labels[][48], int count,
+                                    int current_marker, Vector3 cam_pos, Camera3D camera,
+                                    Font font_label, Font font_value,
+                                    float *m_roll, float *m_pitch, float *m_vert, float *m_speed,
+                                    float speed_max, view_mode_t view_mode, int trail_mode) {
+    Vector3 cam_fwd = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+
+    float sh = (float)GetScreenHeight();
+    float sw = (float)GetScreenWidth();
+    float s = powf(sh / 720.0f, 0.7f);
+
+    for (int i = 0; i < count; i++) {
+        Vector3 p = positions[i];
+        float dx = p.x - cam_pos.x, dy = p.y - cam_pos.y, dz = p.z - cam_pos.z;
+        float dist = sqrtf(dx*dx + dy*dy + dz*dz);
+        float size = (0.05f + dist * 0.001f) * 2.0f * 0.9f;
+
+        // Skip if behind camera
+        Vector3 to_marker = {dx, dy, dz};
+        float dot = to_marker.x * cam_fwd.x + to_marker.y * cam_fwd.y + to_marker.z * cam_fwd.z;
+        if (dot < 0.0f) continue;
+
+        bool is_current = (i == current_marker);
+
+        char display[64];
+        if (labels[i][0] != '\0')
+            snprintf(display, sizeof(display), "S: %s", labels[i]);
+        else
+            snprintf(display, sizeof(display), "S%d", i + 1);
+
+        Vector2 screen = GetWorldToScreen(
+            (Vector3){p.x, p.y + size * 3.0f, p.z}, camera);
+
+        if (screen.x < -50 || screen.x > sw + 50 ||
+            screen.y < -50 || screen.y > sh + 50) continue;
+
+        float fs = (is_current ? 18 : 15) * s;
+        Vector2 tw = MeasureTextEx(font_value, display, fs, 0.5f);
+        float pad_x = 8 * s, pad_y = 5 * s;
+
+        float rx = screen.x - tw.x / 2 - pad_x;
+        float ry = screen.y - tw.y / 2 - pad_y;
+        float rw = tw.x + pad_x * 2;
+        float rh = tw.y + pad_y * 2;
+
+        Color text_col = vehicle_marker_color(m_roll[i], m_pitch[i], m_vert[i], m_speed[i],
+                                              speed_max, view_mode, trail_mode);
+        if (is_current) {
+            if (view_mode == VIEW_SNOW) {
+                text_col.r = (unsigned char)(text_col.r * 0.55f);
+                text_col.g = (unsigned char)(text_col.g * 0.55f);
+                text_col.b = (unsigned char)(text_col.b * 0.55f);
+            } else {
+                text_col.r = (unsigned char)(text_col.r + (230 - text_col.r) * 0.7f);
+                text_col.g = (unsigned char)(text_col.g + (230 - text_col.g) * 0.7f);
+                text_col.b = (unsigned char)(text_col.b + (230 - text_col.b) * 0.7f);
+            }
+        }
+        text_col.a = 255;
+
+        // View-mode-aware label background (same themes as user markers)
+        Color label_bg, label_border;
+        if (view_mode == VIEW_SNOW) {
+            label_bg = (Color){220, 222, 226, 220};
+            label_border = (Color){15, 15, 20, 100};
+        } else if (view_mode == VIEW_1988) {
+            label_bg = (Color){5, 5, 16, 210};
+            label_border = (Color){55, 55, 160, (unsigned char)(180 + 60 * sinf((float)i * 1.7f + (float)GetTime() * 3.0f))};
+        } else if (view_mode == VIEW_REZ) {
+            label_bg = (Color){8, 8, 12, 210};
+            label_border = (Color){text_col.r, text_col.g, text_col.b, 140};
+        } else {
+            label_bg = (Color){10, 14, 20, 255};
+            label_border = (Color){0, 0, 0, 0};
+        }
+
+        DrawRectangleRounded(
+            (Rectangle){rx, ry, rw, rh},
+            0.3f, 6, label_bg);
+        DrawRectangleRoundedLinesEx(
+            (Rectangle){rx, ry, rw, rh},
+            0.3f, 6, 1.0f, label_border);
         DrawTextEx(font_value, display,
                    (Vector2){screen.x - tw.x / 2, screen.y - tw.y / 2},
                    fs, 0.5f, text_col);

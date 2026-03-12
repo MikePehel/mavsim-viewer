@@ -72,6 +72,8 @@ typedef struct {
     bool is_underwater;      // U key toggle (eventually auto from MAV_TYPE_SUBMARINE)
     int loc_isUnderwater;    // grid shader uniform
     int loc_time;            // grid shader uniform (caustic animation)
+    int loc_fogStart;        // grid shader fog start distance
+    int loc_fogEnd;          // grid shader fog end distance
 } scene_t;
 
 // Initialize scene (ground plane, sky, camera, lighting).

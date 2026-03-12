@@ -684,11 +684,73 @@ int main(int argc, char *argv[]) {
     float marker_times[MAX_MARKERS];       // replay timestamp (seconds) for each marker
     Vector3 marker_positions[MAX_MARKERS]; // world position at each marker
     char marker_labels[MAX_MARKERS][MARKER_LABEL_MAX];
+    // Snapshotted telemetry at each marker (for stable trail-matched colors)
+    float marker_roll[MAX_MARKERS];
+    float marker_pitch[MAX_MARKERS];
+    float marker_vert[MAX_MARKERS];
+    float marker_speed[MAX_MARKERS];
     memset(marker_labels, 0, sizeof(marker_labels));
     int marker_count = 0;
     int current_marker = -1;               // index of last-jumped-to marker (-1 = none)
     double last_marker_drop_time = 0.0;    // for B→L chord detection
     int last_marker_drop_idx = -1;         // which marker was just dropped
+
+    // System markers (from ULog mode changes) — cubes, not user-editable
+    #define MAX_SYS_MARKERS 256
+    int sys_marker_count = 0;
+    float sys_marker_times[MAX_SYS_MARKERS];
+    Vector3 sys_marker_positions[MAX_SYS_MARKERS];
+    char sys_marker_labels[MAX_SYS_MARKERS][MARKER_LABEL_MAX];
+    float sys_marker_roll[MAX_SYS_MARKERS];
+    float sys_marker_pitch[MAX_SYS_MARKERS];
+    float sys_marker_vert[MAX_SYS_MARKERS];
+    float sys_marker_speed[MAX_SYS_MARKERS];
+    memset(sys_marker_labels, 0, sizeof(sys_marker_labels));
+    int current_sys_marker = -1;  // -1 = none selected
+    bool sys_marker_selected = false;  // true = current selection is a sys marker, false = user marker
+
+    // Helper: sync vehicle state after a replay seek.
+    // Forces state copy from ctx→sources→vehicle, truncates trail to seek time.
+    #define REPLAY_SYNC_AFTER_SEEK(ctx, src, veh) do { \
+        (src)->state = (ctx)->state; \
+        (src)->home = (ctx)->home; \
+        (src)->playback.position_s = (float)(ctx)->wall_accum; \
+        uint64_t _range = (ctx)->parser.end_timestamp - (ctx)->parser.start_timestamp; \
+        if (_range > 0) (src)->playback.progress = (src)->playback.position_s / ((float)((double)_range / 1e6)); \
+        (veh)->current_time = (src)->playback.position_s; \
+        vehicle_update((veh), &(src)->state, &(src)->home); \
+        vehicle_truncate_trail((veh), (src)->playback.position_s); \
+    } while(0)
+
+    // Populate system markers by seeking to each mode change time
+    // Read directly from ulog ctx since sources[0].playback isn't populated yet (ulog_poll hasn't run)
+    if (is_replay) {
+        ulog_replay_ctx_t *ctx = (ulog_replay_ctx_t *)sources[0].impl;
+        int count = ctx->mode_change_count;
+        if (count > MAX_SYS_MARKERS) count = MAX_SYS_MARKERS;
+        if (count > 0) {
+            // Store times and labels now; positions resolved lazily after origin is established
+            for (int i = 0; i < count; i++) {
+                sys_marker_times[i] = ctx->mode_changes[i].time_s;
+                const char *name = ulog_nav_state_name(ctx->mode_changes[i].nav_state);
+                snprintf(sys_marker_labels[i], MARKER_LABEL_MAX, "%s", name);
+                sys_marker_positions[i] = (Vector3){0};
+            }
+            sys_marker_count = count;
+        }
+    }
+
+    bool sys_markers_resolved = false;  // set true after positions are computed
+
+    // Pre-computed flight trail (built once after origin is established)
+    // Stores the entire flight path so marker seeks can restore trail instantly
+    #define PRECOMP_TRAIL_MAX 36000
+    Vector3 *precomp_trail = NULL;
+    float *precomp_roll = NULL, *precomp_pitch = NULL;
+    float *precomp_vert = NULL, *precomp_speed = NULL, *precomp_time = NULL;
+    int precomp_count = 0;
+    float precomp_speed_max = 0.0f;
+    bool precomp_ready = false;
 
     // Marker label input state
     bool show_marker_labels = true;
@@ -745,19 +807,6 @@ int main(int argc, char *argv[]) {
     int bench_phase_count = 0;
     if (bench_mode && bench_duration > 0.0f)
         cpu_sample_begin(&bench_cpu_sample);
-
-    // Helper: sync vehicle state after a replay seek.
-    // Forces state copy from ctx→sources→vehicle, truncates trail to seek time.
-    #define REPLAY_SYNC_AFTER_SEEK(ctx, src, veh) do { \
-        (src)->state = (ctx)->state; \
-        (src)->home = (ctx)->home; \
-        (src)->playback.position_s = (float)(ctx)->wall_accum; \
-        uint64_t _range = (ctx)->parser.end_timestamp - (ctx)->parser.start_timestamp; \
-        if (_range > 0) (src)->playback.progress = (src)->playback.position_s / ((float)((double)_range / 1e6)); \
-        (veh)->current_time = (src)->playback.position_s; \
-        vehicle_update((veh), &(src)->state, &(src)->home); \
-        vehicle_truncate_trail((veh), (src)->playback.position_s); \
-    } while(0)
 
     // Main loop
     while (!WindowShouldClose()) {
@@ -1129,6 +1178,118 @@ int main(int argc, char *argv[]) {
             last_pos[i] = vehicles[i].position;
         }
 
+        // Lazy-resolve system marker positions once origin is established
+        if (is_replay && !sys_markers_resolved && sys_marker_count > 0 && vehicles[0].origin_set) {
+            ulog_replay_ctx_t *ctx = (ulog_replay_ctx_t *)sources[0].impl;
+            float saved_pos = sources[0].playback.position_s;
+            // Resolve positions; discard markers with no valid GPS (lat=0, lon=0)
+            int valid = 0;
+            for (int i = 0; i < sys_marker_count; i++) {
+                ulog_replay_seek(ctx, sys_marker_times[i]);
+                REPLAY_SYNC_AFTER_SEEK(ctx, &sources[0], &vehicles[0]);
+                // Skip markers with no valid position
+                if (sources[0].state.lat == 0 && sources[0].state.lon == 0) continue;
+                Vector3 mp = vehicles[0].position;
+                if (mp.x == 0.0f && mp.y == 0.0f && mp.z == 0.0f) continue;
+                float mdist = sqrtf(mp.x * mp.x + mp.y * mp.y + mp.z * mp.z);
+                if (mdist > 5000.0f) continue;
+                sys_marker_times[valid] = sys_marker_times[i];
+                memcpy(sys_marker_labels[valid], sys_marker_labels[i], MARKER_LABEL_MAX);
+                sys_marker_positions[valid] = vehicles[0].position;
+                sys_marker_roll[valid] = vehicles[0].roll_deg;
+                sys_marker_pitch[valid] = vehicles[0].pitch_deg;
+                sys_marker_vert[valid] = vehicles[0].vertical_speed;
+                sys_marker_speed[valid] = sqrtf(vehicles[0].ground_speed * vehicles[0].ground_speed +
+                                                 vehicles[0].vertical_speed * vehicles[0].vertical_speed);
+                valid++;
+            }
+            sys_marker_count = valid;
+
+            // Pre-compute entire flight trail from ULog position data
+            if (!precomp_ready) {
+                precomp_trail = calloc(PRECOMP_TRAIL_MAX, sizeof(Vector3));
+                precomp_roll  = calloc(PRECOMP_TRAIL_MAX, sizeof(float));
+                precomp_pitch = calloc(PRECOMP_TRAIL_MAX, sizeof(float));
+                precomp_vert  = calloc(PRECOMP_TRAIL_MAX, sizeof(float));
+                precomp_speed = calloc(PRECOMP_TRAIL_MAX, sizeof(float));
+                precomp_time  = calloc(PRECOMP_TRAIL_MAX, sizeof(float));
+
+                if (precomp_trail && precomp_roll && precomp_pitch &&
+                    precomp_vert && precomp_speed && precomp_time) {
+                    double lat0 = vehicles[0].lat0;
+                    double lon0 = vehicles[0].lon0;
+                    double alt0 = vehicles[0].alt0;
+                    float cos_lat0 = (float)cos(lat0);
+                    Vector3 prev_pos = {0};
+                    bool prev_valid = false;
+                    int pc = 0;
+
+                    ulog_replay_seek(ctx, 0.0f);
+                    float step = 0.2f;
+                    while (pc < PRECOMP_TRAIL_MAX) {
+                        float prev_wall = (float)ctx->wall_accum;
+                        bool ok = ulog_replay_advance(ctx, step, 1.0f, false, false);
+                        if (!ok || (float)ctx->wall_accum <= prev_wall) break;
+
+                        hil_state_t *st = &ctx->state;
+                        if (!st->valid) continue;
+                        if (st->lat == 0 && st->lon == 0) continue;
+
+                        double lat = st->lat * 1e-7 * (M_PI / 180.0);
+                        double lon = st->lon * 1e-7 * (M_PI / 180.0);
+                        double alt = st->alt * 1e-3;
+                        double ned_x = 6371000.0 * (lat - lat0);
+                        double ned_y = 6371000.0 * (lon - lon0) * cos_lat0;
+                        double ned_z = alt - alt0;
+                        Vector3 pos = {
+                            (float)ned_y,
+                            (float)ned_z < 0.0f ? 0.0f : (float)ned_z,
+                            (float)(-ned_x)
+                        };
+
+                        if (prev_valid) {
+                            float dx = pos.x - prev_pos.x;
+                            float dy = pos.y - prev_pos.y;
+                            float dz = pos.z - prev_pos.z;
+                            if (dx*dx + dy*dy + dz*dz < 0.25f) continue;
+                        }
+
+                        float qw = st->quaternion[0], qx = st->quaternion[1];
+                        float qy = st->quaternion[2], qz = st->quaternion[3];
+                        if (qw < 0) { qw = -qw; qx = -qx; qy = -qy; qz = -qz; }
+                        float roll = atan2f(2.0f*(qw*qx + qy*qz),
+                                            1.0f - 2.0f*(qx*qx + qy*qy)) * RAD2DEG;
+                        float sin_p = 2.0f*(qw*qy - qz*qx);
+                        if (sin_p > 1.0f) sin_p = 1.0f;
+                        if (sin_p < -1.0f) sin_p = -1.0f;
+                        float pitch = asinf(sin_p) * RAD2DEG;
+                        float vert_s = -st->vz * 0.01f;
+                        float gs = sqrtf((float)st->vx*st->vx + (float)st->vy*st->vy) * 0.01f;
+                        float spd = sqrtf(gs*gs + vert_s*vert_s);
+
+                        precomp_trail[pc] = pos;
+                        precomp_roll[pc] = roll;
+                        precomp_pitch[pc] = pitch;
+                        precomp_vert[pc] = vert_s;
+                        precomp_speed[pc] = spd;
+                        precomp_time[pc] = (float)ctx->wall_accum;
+                        if (spd > precomp_speed_max) precomp_speed_max = spd;
+                        pc++;
+                        prev_pos = pos;
+                        prev_valid = true;
+                    }
+                    precomp_count = pc;
+                    precomp_ready = true;
+                }
+            }
+
+            // Restore playback to where it was
+            ulog_replay_seek(ctx, saved_pos);
+            vehicle_reset_trail(&vehicles[0]);
+            REPLAY_SYNC_AFTER_SEEK(ctx, &sources[0], &vehicles[0]);
+            sys_markers_resolved = true;
+        }
+
         // Check if any source is connected (for HUD)
         bool any_connected = fake_mode || missile_mode || bench_mode;
         for (int i = 0; i < vehicle_count && !any_connected; i++) {
@@ -1306,10 +1467,10 @@ int main(int argc, char *argv[]) {
                     sources[0].playback.paused = !sources[0].playback.paused;
                 }
             }
-            if (IsKeyPressed(KEY_L) && !shift && (last_marker_drop_idx < 0 || GetTime() - last_marker_drop_time >= 0.5)) {
+            if (IsKeyPressed(KEY_L) && shift) {
                 sources[0].playback.looping = !sources[0].playback.looping;
             }
-            if (IsKeyPressed(KEY_L) && shift) {
+            if (IsKeyPressed(KEY_L) && !shift && (last_marker_drop_idx < 0 || GetTime() - last_marker_drop_time >= 0.5)) {
                 show_marker_labels = !show_marker_labels;
             }
             if (IsKeyPressed(KEY_I)) {
@@ -1379,6 +1540,10 @@ int main(int argc, char *argv[]) {
                             marker_times[m] = marker_times[m + 1];
                             marker_positions[m] = marker_positions[m + 1];
                             memcpy(marker_labels[m], marker_labels[m + 1], MARKER_LABEL_MAX);
+                            marker_roll[m] = marker_roll[m + 1];
+                            marker_pitch[m] = marker_pitch[m + 1];
+                            marker_vert[m] = marker_vert[m + 1];
+                            marker_speed[m] = marker_speed[m + 1];
                         }
                         marker_count--;
                         if (current_marker >= marker_count) current_marker = marker_count - 1;
@@ -1397,12 +1562,23 @@ int main(int argc, char *argv[]) {
                         marker_times[m] = marker_times[m - 1];
                         marker_positions[m] = marker_positions[m - 1];
                         memcpy(marker_labels[m], marker_labels[m - 1], MARKER_LABEL_MAX);
+                        marker_roll[m] = marker_roll[m - 1];
+                        marker_pitch[m] = marker_pitch[m - 1];
+                        marker_vert[m] = marker_vert[m - 1];
+                        marker_speed[m] = marker_speed[m - 1];
                     }
                     marker_times[insert] = t;
                     marker_positions[insert] = pos;
                     marker_labels[insert][0] = '\0';
+                    marker_roll[insert] = vehicles[0].roll_deg;
+                    marker_pitch[insert] = vehicles[0].pitch_deg;
+                    marker_vert[insert] = vehicles[0].vertical_speed;
+                    marker_speed[insert] = sqrtf(vehicles[0].ground_speed * vehicles[0].ground_speed +
+                                                  vehicles[0].vertical_speed * vehicles[0].vertical_speed);
                     marker_count++;
                     current_marker = insert;
+                    sys_marker_selected = false;
+                    current_sys_marker = -1;
                     last_marker_drop_time = GetTime();
                     last_marker_drop_idx = insert;
                 }
@@ -1420,59 +1596,142 @@ int main(int argc, char *argv[]) {
                     last_marker_drop_idx = -1;
                 }
             }
-            if (IsKeyPressed(KEY_LEFT_BRACKET) && marker_count > 0) {
-                // Determine target: decrement from current, or find nearest before playhead
-                int target;
-                if (current_marker > 0) {
-                    target = current_marker - 1;
-                } else if (current_marker == 0) {
-                    target = 0;  // already at first, stay
-                } else {
-                    // No current marker — find nearest before playhead
-                    float t = sources[0].playback.position_s;
-                    target = -1;
-                    for (int m = marker_count - 1; m >= 0; m--) {
-                        if (marker_times[m] <= t) { target = m; break; }
+            // Unified [/] cycling through both user markers and system markers (sorted by time)
+            if ((IsKeyPressed(KEY_LEFT_BRACKET) || IsKeyPressed(KEY_RIGHT_BRACKET))
+                && (marker_count > 0 || sys_marker_count > 0)) {
+                // Build a merged list of all markers sorted by time
+                // Each entry: time, index, is_sys
+                int total = marker_count + sys_marker_count;
+                typedef struct { float time; int idx; bool is_sys; } merged_marker_t;
+                merged_marker_t merged[MAX_MARKERS + MAX_SYS_MARKERS];
+                int mi = 0;
+                for (int m = 0; m < marker_count; m++) {
+                    merged[mi++] = (merged_marker_t){marker_times[m], m, false};
+                }
+                for (int m = 0; m < sys_marker_count; m++) {
+                    merged[mi++] = (merged_marker_t){sys_marker_times[m], m, true};
+                }
+                // Simple insertion sort (small N)
+                for (int a = 1; a < total; a++) {
+                    merged_marker_t key = merged[a];
+                    int b = a - 1;
+                    while (b >= 0 && merged[b].time > key.time) {
+                        merged[b + 1] = merged[b];
+                        b--;
                     }
-                    if (target < 0) target = 0;
+                    merged[b + 1] = key;
                 }
-                if (shift) {
-                    current_marker = target;
-                    scene.cam_mode = CAM_MODE_FREE;
-                    scene.camera.position = marker_positions[target];
-                    scene.camera.target = vehicles[0].position;
-                } else {
-                    ulog_replay_ctx_t *ctx = (ulog_replay_ctx_t *)sources[0].impl;
-                    ulog_replay_seek(ctx, marker_times[target]);
-                    REPLAY_SYNC_AFTER_SEEK(ctx, &sources[0], &vehicles[0]);
-                    current_marker = target;
-                }
-            }
-            if (IsKeyPressed(KEY_RIGHT_BRACKET) && marker_count > 0) {
-                int target;
-                if (current_marker >= 0 && current_marker < marker_count - 1) {
-                    target = current_marker + 1;
-                } else if (current_marker < 0) {
-                    // No current marker — find nearest after playhead
-                    float t = sources[0].playback.position_s;
-                    target = -1;
-                    for (int m = 0; m < marker_count; m++) {
-                        if (marker_times[m] >= t) { target = m; break; }
+
+                // Find current position in merged list
+                int cur_merged = -1;
+                if (sys_marker_selected && current_sys_marker >= 0) {
+                    for (int m = 0; m < total; m++) {
+                        if (merged[m].is_sys && merged[m].idx == current_sys_marker) {
+                            cur_merged = m; break;
+                        }
                     }
-                    if (target < 0) target = marker_count - 1;
-                } else {
-                    target = marker_count - 1;  // already at last, stay
+                } else if (!sys_marker_selected && current_marker >= 0) {
+                    for (int m = 0; m < total; m++) {
+                        if (!merged[m].is_sys && merged[m].idx == current_marker) {
+                            cur_merged = m; break;
+                        }
+                    }
                 }
-                if (shift) {
-                    current_marker = target;
-                    scene.cam_mode = CAM_MODE_FREE;
-                    scene.camera.position = marker_positions[target];
-                    scene.camera.target = vehicles[0].position;
+
+                int target_merged = -1;
+                if (IsKeyPressed(KEY_LEFT_BRACKET)) {
+                    if (cur_merged > 0) {
+                        target_merged = cur_merged - 1;
+                    } else if (cur_merged == 0) {
+                        target_merged = total - 1;  // wrap to last
+                    } else {
+                        // Find nearest before playhead
+                        float t = sources[0].playback.position_s;
+                        for (int m = total - 1; m >= 0; m--) {
+                            if (merged[m].time <= t) { target_merged = m; break; }
+                        }
+                        if (target_merged < 0) target_merged = total - 1;
+                    }
                 } else {
-                    ulog_replay_ctx_t *ctx = (ulog_replay_ctx_t *)sources[0].impl;
-                    ulog_replay_seek(ctx, marker_times[target]);
-                    REPLAY_SYNC_AFTER_SEEK(ctx, &sources[0], &vehicles[0]);
-                    current_marker = target;
+                    if (cur_merged >= 0 && cur_merged < total - 1) {
+                        target_merged = cur_merged + 1;
+                    } else if (cur_merged < 0) {
+                        float t = sources[0].playback.position_s;
+                        for (int m = 0; m < total; m++) {
+                            if (merged[m].time >= t) { target_merged = m; break; }
+                        }
+                        if (target_merged < 0) target_merged = 0;
+                    } else {
+                        target_merged = 0;  // wrap to first
+                    }
+                }
+
+                if (target_merged >= 0 && target_merged < total) {
+                    merged_marker_t tgt = merged[target_merged];
+                    float seek_time = tgt.time;
+                    Vector3 seek_pos = tgt.is_sys ? sys_marker_positions[tgt.idx] : marker_positions[tgt.idx];
+
+                    // Update selection state
+                    sys_marker_selected = tgt.is_sys;
+                    if (tgt.is_sys) {
+                        current_sys_marker = tgt.idx;
+                        current_marker = -1;
+                    } else {
+                        current_marker = tgt.idx;
+                        current_sys_marker = -1;
+                    }
+
+                    if (shift) {
+                        scene.cam_mode = CAM_MODE_FREE;
+                        scene.camera.position = seek_pos;
+                        scene.camera.target = vehicles[0].position;
+                    } else {
+                        ulog_replay_ctx_t *ctx = (ulog_replay_ctx_t *)sources[0].impl;
+
+                        // Seek and sync state (no vehicle_update yet — precomp trail first)
+                        ulog_replay_seek(ctx, seek_time);
+                        sources[0].state = ctx->state;
+                        sources[0].home = ctx->home;
+                        sources[0].playback.position_s = (float)ctx->wall_accum;
+                        uint64_t _range = ctx->parser.end_timestamp - ctx->parser.start_timestamp;
+                        if (_range > 0) sources[0].playback.progress = sources[0].playback.position_s / ((float)((double)_range / 1e6));
+                        vehicles[0].current_time = sources[0].playback.position_s;
+
+                        // Restore trail from pre-computed data up to seek_time
+                        if (precomp_ready && precomp_count > 0) {
+                            int lo = 0, hi = precomp_count - 1, cut = 0;
+                            while (lo <= hi) {
+                                int mid = (lo + hi) / 2;
+                                if (precomp_time[mid] <= seek_time) {
+                                    cut = mid + 1;
+                                    lo = mid + 1;
+                                } else {
+                                    hi = mid - 1;
+                                }
+                            }
+                            vehicle_t *v = &vehicles[0];
+                            int n = cut;
+                            if (n > v->trail_capacity) n = v->trail_capacity;
+                            int src_start = cut - n;
+                            v->trail_count = n;
+                            v->trail_head = n % v->trail_capacity;
+                            v->trail_speed_max = 0.0f;
+                            for (int i = 0; i < n; i++) {
+                                int si = src_start + i;
+                                v->trail[i] = precomp_trail[si];
+                                v->trail_roll[i] = precomp_roll[si];
+                                v->trail_pitch[i] = precomp_pitch[si];
+                                v->trail_vert[i] = precomp_vert[si];
+                                v->trail_speed[i] = precomp_speed[si];
+                                v->trail_time[i] = precomp_time[si];
+                                if (precomp_speed[si] > v->trail_speed_max)
+                                    v->trail_speed_max = precomp_speed[si];
+                            }
+                        }
+                        // Update vehicle state and suppress jump detector on next frame
+                        vehicle_update(&vehicles[0], &sources[0].state, &sources[0].home);
+                        last_pos[0] = vehicles[0].position;
+                    }
                 }
             }
         }
@@ -1510,7 +1769,18 @@ int main(int argc, char *argv[]) {
                 // Draw frame marker spheres during replay
                 if (is_replay && marker_count > 0) {
                     vehicle_draw_markers(marker_positions, marker_labels, marker_count,
-                                         current_marker, scene.camera.position, scene.camera);
+                                         sys_marker_selected ? -1 : current_marker,
+                                         scene.camera.position, scene.camera,
+                                         marker_roll, marker_pitch, marker_vert, marker_speed,
+                                         vehicles[0].trail_speed_max, scene.view_mode, trail_mode);
+                }
+                // Draw system marker cubes during replay
+                if (is_replay && sys_marker_count > 0) {
+                    vehicle_draw_sys_markers(sys_marker_positions, sys_marker_labels, sys_marker_count,
+                                             sys_marker_selected ? current_sys_marker : -1,
+                                             scene.camera.position,
+                                             sys_marker_roll, sys_marker_pitch, sys_marker_vert, sys_marker_speed,
+                                             vehicles[0].trail_speed_max, scene.view_mode, trail_mode);
                 }
             EndMode3D();
 
@@ -1523,16 +1793,92 @@ int main(int argc, char *argv[]) {
             // Marker labels (2D billboarded text, after EndMode3D)
             if (is_replay && marker_count > 0 && show_marker_labels) {
                 vehicle_draw_marker_labels(marker_positions, marker_labels, marker_count,
-                                           current_marker, scene.camera.position, scene.camera,
-                                           hud.font_label, hud.font_value);
+                                           sys_marker_selected ? -1 : current_marker,
+                                           scene.camera.position, scene.camera,
+                                           hud.font_label, hud.font_value,
+                                           marker_roll, marker_pitch, marker_vert, marker_speed,
+                                           vehicles[0].trail_speed_max, scene.view_mode, trail_mode);
+            }
+            // System marker labels
+            if (is_replay && sys_marker_count > 0 && show_marker_labels) {
+                vehicle_draw_sys_marker_labels(sys_marker_positions, sys_marker_labels, sys_marker_count,
+                                               sys_marker_selected ? current_sys_marker : -1,
+                                               scene.camera.position, scene.camera,
+                                               hud.font_label, hud.font_value,
+                                               sys_marker_roll, sys_marker_pitch, sys_marker_vert, sys_marker_speed,
+                                               vehicles[0].trail_speed_max, scene.view_mode, trail_mode);
             }
 
             // HUD
             if (show_hud) {
                 hud_draw(&hud, vehicles, sources, vehicle_count,
                          selected, GetScreenWidth(), GetScreenHeight(),
-                         scene.view_mode, scene.is_underwater,
-                         marker_times, marker_labels, marker_count, current_marker);
+                         scene.view_mode, scene.is_underwater, trail_mode,
+                         marker_times, marker_labels, marker_count,
+                         sys_marker_selected ? -1 : current_marker,
+                         marker_roll, marker_pitch, marker_vert, marker_speed,
+                         vehicles[0].trail_speed_max,
+                         sys_marker_times, sys_marker_labels,
+                         sys_marker_count, current_sys_marker, sys_marker_selected,
+                         sys_marker_roll, sys_marker_pitch, sys_marker_vert, sys_marker_speed);
+            }
+
+            // Free camera indicator (top right) — shows marker name if at a marker
+            if (scene.cam_mode == CAM_MODE_FREE) {
+                int sw = GetScreenWidth();
+                float s = powf((float)GetScreenHeight() / 720.0f, 0.7f);
+                float fs = 14 * s;
+                char fc_buf[80];
+                if (sys_marker_selected && current_sys_marker >= 0) {
+                    snprintf(fc_buf, sizeof(fc_buf), "FREE CAM  %s", sys_marker_labels[current_sys_marker]);
+                } else if (!sys_marker_selected && current_marker >= 0 && marker_labels[current_marker][0] != '\0') {
+                    snprintf(fc_buf, sizeof(fc_buf), "FREE CAM  %d: %s", current_marker + 1, marker_labels[current_marker]);
+                } else if (!sys_marker_selected && current_marker >= 0) {
+                    snprintf(fc_buf, sizeof(fc_buf), "FREE CAM  Marker %d", current_marker + 1);
+                } else {
+                    snprintf(fc_buf, sizeof(fc_buf), "FREE CAM");
+                }
+                Vector2 tw = MeasureTextEx(hud.font_label, fc_buf, fs, 0.5f);
+                float px = 8 * s, py = 4 * s;
+                float rx = sw - tw.x - px * 2 - 10 * s;
+                float ry = 10 * s;
+                // Marker-colored text if at a marker, otherwise default
+                Color fc_text;
+                bool has_marker_col = false;
+                if (sys_marker_selected && current_sys_marker >= 0) {
+                    fc_text = vehicle_marker_color(sys_marker_roll[current_sys_marker],
+                                                   sys_marker_pitch[current_sys_marker],
+                                                   sys_marker_vert[current_sys_marker],
+                                                   sys_marker_speed[current_sys_marker],
+                                                   vehicles[0].trail_speed_max, scene.view_mode, trail_mode);
+                    has_marker_col = true;
+                } else if (!sys_marker_selected && current_marker >= 0) {
+                    fc_text = vehicle_marker_color(marker_roll[current_marker],
+                                                   marker_pitch[current_marker],
+                                                   marker_vert[current_marker],
+                                                   marker_speed[current_marker],
+                                                   vehicles[0].trail_speed_max, scene.view_mode, trail_mode);
+                    has_marker_col = true;
+                }
+                if (has_marker_col) {
+                    if (scene.view_mode == VIEW_SNOW) {
+                        fc_text.r = (unsigned char)(fc_text.r * 0.55f);
+                        fc_text.g = (unsigned char)(fc_text.g * 0.55f);
+                        fc_text.b = (unsigned char)(fc_text.b * 0.55f);
+                    } else {
+                        fc_text.r = (unsigned char)(fc_text.r + (230 - fc_text.r) * 0.7f);
+                        fc_text.g = (unsigned char)(fc_text.g + (230 - fc_text.g) * 0.7f);
+                        fc_text.b = (unsigned char)(fc_text.b + (230 - fc_text.b) * 0.7f);
+                    }
+                } else {
+                    fc_text = scene.view_mode == VIEW_SNOW ? (Color){60, 65, 75, 255} : (Color){200, 208, 218, 255};
+                }
+                Color fc_bg = scene.view_mode == VIEW_SNOW ? (Color){220, 222, 226, 220} : (Color){10, 14, 20, 220};
+                DrawRectangleRounded(
+                    (Rectangle){rx, ry, tw.x + px * 2, tw.y + py * 2},
+                    0.3f, 6, fc_bg);
+                DrawTextEx(hud.font_label, fc_buf,
+                           (Vector2){rx + px, ry + py}, fs, 0.5f, fc_text);
             }
 
             // Debug panel
@@ -1556,53 +1902,95 @@ int main(int argc, char *argv[]) {
             ortho_panel_draw_fullscreen_label(GetScreenWidth(), GetScreenHeight(),
                 scene.ortho_mode, scene.ortho_span, scene.view_mode, hud.font_label);
 
-            // Marker label input overlay
+            // Marker label input overlay (view-mode-aware)
             if (marker_input_active) {
                 int sw = GetScreenWidth(), sh = GetScreenHeight();
                 float s = powf(sh / 720.0f, 0.7f);
-                DrawRectangle(0, 0, sw, sh, (Color){0, 0, 0, 140});
+
+                // View-mode colors
+                Color scrim_col, box_bg, box_border, prompt_col, hint_col;
+                Color field_bg, field_border, text_col, cursor_col;
+                if (scene.view_mode == VIEW_SNOW) {
+                    scrim_col    = (Color){255, 255, 255, 140};
+                    box_bg       = (Color){248, 248, 250, 240};
+                    box_border   = (Color){15, 15, 20, 120};
+                    prompt_col   = (Color){60, 65, 75, 255};
+                    hint_col     = (Color){120, 125, 135, 200};
+                    field_bg     = (Color){235, 236, 240, 255};
+                    field_border = (Color){15, 15, 20, 80};
+                    text_col     = (Color){10, 10, 15, 255};
+                    cursor_col   = (Color){15, 15, 20, 220};
+                } else if (scene.view_mode == VIEW_1988) {
+                    scrim_col    = (Color){5, 0, 15, 160};
+                    box_bg       = (Color){5, 5, 16, 240};
+                    box_border   = (Color){255, 20, 100, 140};
+                    prompt_col   = (Color){255, 20, 100, 200};
+                    hint_col     = (Color){180, 60, 120, 160};
+                    field_bg     = (Color){12, 8, 24, 255};
+                    field_border = (Color){255, 20, 100, 100};
+                    text_col     = (Color){255, 220, 60, 255};
+                    cursor_col   = (Color){255, 20, 100, 220};
+                } else if (scene.view_mode == VIEW_REZ) {
+                    scrim_col    = (Color){0, 0, 0, 150};
+                    box_bg       = (Color){8, 8, 12, 235};
+                    box_border   = (Color){0, 204, 218, 100};
+                    prompt_col   = (Color){0, 204, 218, 200};
+                    hint_col     = (Color){0, 140, 150, 160};
+                    field_bg     = (Color){4, 4, 8, 255};
+                    field_border = (Color){0, 204, 218, 80};
+                    text_col     = (Color){200, 208, 218, 255};
+                    cursor_col   = (Color){0, 204, 218, 220};
+                } else {
+                    scrim_col    = (Color){0, 0, 0, 140};
+                    box_bg       = (Color){10, 14, 20, 235};
+                    box_border   = (Color){0, 180, 204, 100};
+                    prompt_col   = (Color){140, 150, 170, 255};
+                    hint_col     = (Color){90, 95, 110, 200};
+                    field_bg     = (Color){6, 8, 12, 255};
+                    field_border = (Color){50, 55, 70, 180};
+                    text_col     = WHITE;
+                    cursor_col   = (Color){0, 255, 255, 220};
+                }
+
+                DrawRectangle(0, 0, sw, sh, scrim_col);
 
                 float box_w = 520 * s, box_h = 110 * s;
                 float bx = (sw - box_w) / 2, by = (sh - box_h) / 2;
                 Rectangle box = {bx, by, box_w, box_h};
 
-                // Background + border (matches HUD style)
-                DrawRectangleRounded(box, 0.06f, 8, (Color){12, 14, 18, 235});
-                DrawRectangleRoundedLinesEx(box, 0.06f, 8, 1.5f * s, (Color){0, 255, 255, 100});
+                DrawRectangleRounded(box, 0.06f, 8, box_bg);
+                DrawRectangleRoundedLinesEx(box, 0.06f, 8, 1.5f * s, box_border);
 
-                // Prompt label (Inter font)
+                // Prompt label
                 float prompt_fs = 15 * s;
                 DrawTextEx(hud.font_label, "MARKER LABEL",
-                           (Vector2){bx + 16 * s, by + 12 * s}, prompt_fs, 0.5f,
-                           (Color){140, 150, 170, 255});
+                           (Vector2){bx + 16 * s, by + 12 * s}, prompt_fs, 0.5f, prompt_col);
 
                 // Hint text
                 float hint_fs = 12 * s;
                 float hint_w = MeasureTextEx(hud.font_label, "Enter to confirm  |  Esc to cancel", hint_fs, 0.5f).x;
                 DrawTextEx(hud.font_label, "Enter to confirm  |  Esc to cancel",
-                           (Vector2){bx + box_w - hint_w - 16 * s, by + 12 * s}, hint_fs, 0.5f,
-                           (Color){90, 95, 110, 200});
+                           (Vector2){bx + box_w - hint_w - 16 * s, by + 12 * s}, hint_fs, 0.5f, hint_col);
 
                 // Input field
                 float field_x = bx + 16 * s, field_y = by + 40 * s;
                 float field_w = box_w - 32 * s, field_h = 44 * s;
                 DrawRectangleRounded((Rectangle){field_x, field_y, field_w, field_h},
-                                     0.08f, 6, (Color){6, 8, 12, 255});
+                                     0.08f, 6, field_bg);
                 DrawRectangleRoundedLinesEx((Rectangle){field_x, field_y, field_w, field_h},
-                                     0.08f, 6, 1.0f * s, (Color){50, 55, 70, 180});
+                                     0.08f, 6, 1.0f * s, field_border);
 
-                // Input text (JetBrains Mono)
+                // Input text
                 float input_fs = 20 * s;
                 float text_y = field_y + (field_h - input_fs) / 2;
                 DrawTextEx(hud.font_value, marker_input_buf,
-                           (Vector2){field_x + 12 * s, text_y}, input_fs, 0.5f, WHITE);
+                           (Vector2){field_x + 12 * s, text_y}, input_fs, 0.5f, text_col);
 
                 // Blinking cursor
                 Vector2 tw = MeasureTextEx(hud.font_value, marker_input_buf, input_fs, 0.5f);
                 if ((int)(GetTime() * 2.0) % 2 == 0) {
                     float cx = field_x + 12 * s + tw.x + 2;
-                    DrawRectangle((int)cx, (int)(text_y), (int)(2 * s), (int)input_fs,
-                                  (Color){0, 255, 255, 220});
+                    DrawRectangle((int)cx, (int)(text_y), (int)(2 * s), (int)input_fs, cursor_col);
                 }
             }
 
@@ -1628,6 +2016,8 @@ int main(int argc, char *argv[]) {
         if (sources[i].ops) data_source_close(&sources[i]);
     }
     scene_cleanup(&scene);
+    free(precomp_trail); free(precomp_roll); free(precomp_pitch);
+    free(precomp_vert); free(precomp_speed); free(precomp_time);
     CloseWindow();
 
     return 0;

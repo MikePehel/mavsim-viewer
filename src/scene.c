@@ -179,7 +179,10 @@ static void mtn_vert(Mesh *m, int vi, float x, float y, float z,
 }
 
 static Mesh gen_mountains(void) {
-    int total_tris = 4 * MTN_COLS * MTN_ROWS * 2;
+    // 4 edges of mountain ranges + 4 corner fill patches (cross-triangulated flat grid)
+    #define CORNER_SUBDIVS 8
+    int corner_tris = 4 * CORNER_SUBDIVS * CORNER_SUBDIVS * 2; // 4 corners, 2 tris per cell
+    int total_tris = 4 * MTN_COLS * MTN_ROWS * 2 + corner_tris;
     int vert_count = total_tris * 3;
 
     Mesh mesh = { 0 };
@@ -233,6 +236,42 @@ static Mesh gen_mountains(void) {
                 mtn_vert(&mesh, vi++, x10,y10,z10, 1,0, cr,cg,cb);
                 mtn_vert(&mesh, vi++, x11,y11,z11, 0,1, cr,cg,cb);
                 mtn_vert(&mesh, vi++, x01,y01,z01, 0,0, cr,cg,cb);
+            }
+        }
+    }
+
+    // Corner fill patches — flat grid to fill gaps between mountain ranges
+    float corner_pts[4][2] = {
+        { -ext, -ext }, {  ext, -ext }, {  ext,  ext }, { -ext,  ext },
+    };
+    float csigns[4][2] = {
+        { -1, -1 }, {  1, -1 }, {  1,  1 }, { -1,  1 },
+    };
+    for (int c = 0; c < 4; c++) {
+        float cx0 = corner_pts[c][0];
+        float cz0 = corner_pts[c][1];
+        float csx = csigns[c][0], csz = csigns[c][1];
+        for (int ci = 0; ci < CORNER_SUBDIVS; ci++) {
+            for (int cj = 0; cj < CORNER_SUBDIVS; cj++) {
+                float u0 = (float)ci / CORNER_SUBDIVS;
+                float u1 = (float)(ci + 1) / CORNER_SUBDIVS;
+                float v0 = (float)cj / CORNER_SUBDIVS;
+                float v1 = (float)(cj + 1) / CORNER_SUBDIVS;
+
+                float x0 = cx0 + csx * u0 * MTN_DEPTH;
+                float x1 = cx0 + csx * u1 * MTN_DEPTH;
+                float z0 = cz0 + csz * v0 * MTN_DEPTH;
+                float z1 = cz0 + csz * v1 * MTN_DEPTH;
+
+                // 2 triangles per cell (diagonal split)
+                float cy = 0.7f;
+                mtn_vert(&mesh, vi++, x0, cy, z0, 1, 0, cr, cg, cb);
+                mtn_vert(&mesh, vi++, x1, cy, z0, 0, 1, cr, cg, cb);
+                mtn_vert(&mesh, vi++, x1, cy, z1, 0, 0, cr, cg, cb);
+
+                mtn_vert(&mesh, vi++, x0, cy, z0, 1, 0, cr, cg, cb);
+                mtn_vert(&mesh, vi++, x1, cy, z1, 0, 1, cr, cg, cb);
+                mtn_vert(&mesh, vi++, x0, cy, z1, 0, 0, cr, cg, cb);
             }
         }
     }
@@ -458,6 +497,8 @@ void scene_init(scene_t *s) {
     s->loc_colTint    = GetShaderLocation(s->grid_shader, "colTint");
     s->loc_isUnderwater = GetShaderLocation(s->grid_shader, "isUnderwater");
     s->loc_time       = GetShaderLocation(s->grid_shader, "uTime");
+    s->loc_fogStart   = GetShaderLocation(s->grid_shader, "fogStart");
+    s->loc_fogEnd     = GetShaderLocation(s->grid_shader, "fogEnd");
 
     // Load terrain texture from pre-baked PNG
     double t0 = GetTime();
@@ -771,9 +812,9 @@ static void color_to_vec4(Color c, float out[4]) {
     out[3] = c.a / 255.0f;
 }
 
-static void draw_shader_grid(const scene_t *s,
+static void draw_shader_grid_ex(const scene_t *s,
     Color ground, Color minor, Color major, Color axis_x, Color axis_z,
-    Color fog, Color tint)
+    Color fog, Color tint, float fog_start, float fog_end)
 {
     float v[4];
     color_to_vec4(ground, v); SetShaderValue(s->grid_shader, s->loc_colGround, v, SHADER_UNIFORM_VEC4);
@@ -790,6 +831,10 @@ static void draw_shader_grid(const scene_t *s,
     SetShaderValue(s->grid_shader, s->loc_spacing, &spacing, SHADER_UNIFORM_FLOAT);
     SetShaderValue(s->grid_shader, s->loc_majorEvery, &majorEvery, SHADER_UNIFORM_FLOAT);
     SetShaderValue(s->grid_shader, s->loc_axisWidth, &axisWidth, SHADER_UNIFORM_FLOAT);
+
+    // Fog distance
+    SetShaderValue(s->grid_shader, s->loc_fogStart, &fog_start, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(s->grid_shader, s->loc_fogEnd, &fog_end, SHADER_UNIFORM_FLOAT);
 
     // Terrain texture toggle
     int texOn = s->ground_tex_on ? 1 : 0;
@@ -826,17 +871,17 @@ void scene_draw(const scene_t *s) {
     if (s->is_underwater) {
         // Underwater: caustic surface, no grid lines (colMinor repurposed as caustic color)
         if (s->view_mode == VIEW_GRID) {
-            draw_shader_grid(s, UW_GRID_GROUND, UW_GRID_CAUSTIC, UW_GRID_CAUSTIC, UW_GRID_CAUSTIC, UW_GRID_CAUSTIC,
-                UW_GRID_FOG, UW_GRID_GROUND);
+            draw_shader_grid_ex(s, UW_GRID_GROUND, UW_GRID_CAUSTIC, UW_GRID_CAUSTIC, UW_GRID_CAUSTIC, UW_GRID_CAUSTIC,
+                UW_GRID_FOG, UW_GRID_GROUND, 400.0f, 800.0f);
         } else if (s->view_mode == VIEW_REZ) {
-            draw_shader_grid(s, UW_REZ_GROUND, UW_REZ_CAUSTIC, UW_REZ_CAUSTIC, UW_REZ_CAUSTIC, UW_REZ_CAUSTIC,
-                UW_REZ_FOG, UW_REZ_GROUND);
+            draw_shader_grid_ex(s, UW_REZ_GROUND, UW_REZ_CAUSTIC, UW_REZ_CAUSTIC, UW_REZ_CAUSTIC, UW_REZ_CAUSTIC,
+                UW_REZ_FOG, UW_REZ_GROUND, 400.0f, 800.0f);
         } else if (s->view_mode == VIEW_SNOW) {
-            draw_shader_grid(s, UW_SNOW_GROUND, UW_SNOW_CAUSTIC, UW_SNOW_CAUSTIC, UW_SNOW_CAUSTIC, UW_SNOW_CAUSTIC,
-                UW_SNOW_FOG, UW_SNOW_GROUND);
+            draw_shader_grid_ex(s, UW_SNOW_GROUND, UW_SNOW_CAUSTIC, UW_SNOW_CAUSTIC, UW_SNOW_CAUSTIC, UW_SNOW_CAUSTIC,
+                UW_SNOW_FOG, UW_SNOW_GROUND, 400.0f, 800.0f);
         } else if (s->view_mode == VIEW_1988) {
-            draw_shader_grid(s, UW_SYNTH_GROUND, UW_SYNTH_CAUSTIC, UW_SYNTH_CAUSTIC, UW_SYNTH_CAUSTIC, UW_SYNTH_CAUSTIC,
-                UW_SYNTH_FOG, UW_SYNTH_GROUND);
+            draw_shader_grid_ex(s, UW_SYNTH_GROUND, UW_SYNTH_CAUSTIC, UW_SYNTH_CAUSTIC, UW_SYNTH_CAUSTIC, UW_SYNTH_CAUSTIC,
+                UW_SYNTH_FOG, UW_SYNTH_GROUND, 500.0f, 900.0f);
             // Wireframe coral (same geometry as mountains, just different colors via 1988 mode)
             rlDisableBackfaceCulling();
             DrawModel(s->mountains, (Vector3){0, 0, 0}, 1.0f, WHITE);
@@ -844,20 +889,20 @@ void scene_draw(const scene_t *s) {
         }
 
     } else if (s->view_mode == VIEW_GRID) {
-        draw_shader_grid(s, GRID_GROUND, GRID_MINOR, GRID_MAJOR, GRID_AXIS_X, GRID_AXIS_Z,
-            (Color){ 30, 34, 28, 255 }, (Color){ 42, 38, 32, 255 });
+        draw_shader_grid_ex(s, GRID_GROUND, GRID_MINOR, GRID_MAJOR, GRID_AXIS_X, GRID_AXIS_Z,
+            (Color){ 30, 34, 28, 255 }, (Color){ 42, 38, 32, 255 }, 400.0f, 800.0f);
     } else if (s->view_mode == VIEW_REZ) {
-        draw_shader_grid(s, REZ_GROUND, REZ_MINOR, REZ_MAJOR, REZ_AXIS_X, REZ_AXIS_Z,
-            REZ_GROUND, (Color){ 31, 31, 59, 255 });
+        draw_shader_grid_ex(s, REZ_GROUND, REZ_MINOR, REZ_MAJOR, REZ_AXIS_X, REZ_AXIS_Z,
+            REZ_GROUND, (Color){ 31, 31, 59, 255 }, 400.0f, 800.0f);
     } else if (s->view_mode == VIEW_SNOW) {
-        draw_shader_grid(s, SNOW_GROUND, SNOW_MINOR, SNOW_MAJOR, SNOW_AXIS_X, SNOW_AXIS_Z,
-            SNOW_GROUND, (Color){ 215, 218, 222, 255 });
+        draw_shader_grid_ex(s, SNOW_GROUND, SNOW_MINOR, SNOW_MAJOR, SNOW_AXIS_X, SNOW_AXIS_Z,
+            SNOW_GROUND, (Color){ 215, 218, 222, 255 }, 400.0f, 800.0f);
     } else if (s->view_mode == VIEW_1988) {
-        draw_shader_grid(s, SYNTH_GROUND, SYNTH_MINOR, SYNTH_MAJOR, SYNTH_AXIS_X, SYNTH_AXIS_Z,
-            SYNTH_GROUND, (Color){ 25, 25, 82, 255 });
-        // Wireframe mountains
+        draw_shader_grid_ex(s, SYNTH_GROUND, SYNTH_MINOR, SYNTH_MAJOR, SYNTH_AXIS_X, SYNTH_AXIS_Z,
+            SYNTH_GROUND, (Color){ 25, 25, 82, 255 }, 800.0f, 1200.0f);
+        // Wireframe mountains — pushed back by 1.4x to match extended grid
         rlDisableBackfaceCulling();
-        DrawModel(s->mountains, (Vector3){0, 0, 0}, 1.0f, WHITE);
+        DrawModel(s->mountains, (Vector3){0, 0, 0}, 1.4f, WHITE);
         rlEnableBackfaceCulling();
     }
 

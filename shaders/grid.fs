@@ -22,6 +22,10 @@ uniform vec4 colTint;
 uniform int isUnderwater;
 uniform float uTime;
 
+// Fog distance control
+uniform float fogStart;  // default 400
+uniform float fogEnd;    // default 800
+
 out vec4 finalColor;
 
 float caustic(vec2 uv, float t) {
@@ -75,7 +79,7 @@ void main() {
         color = mix(color, colAxisZ, axisZLine * colAxisZ.a * 0.5);
 
         // Same fog distance as normal mode
-        float fade = 1.0 - smoothstep(400.0, 800.0, dist);
+        float fade = 1.0 - smoothstep(fogStart, fogEnd, dist);
         color.rgb = mix(colFog.rgb, color.rgb, fade);
 
         color.a = 1.0;
@@ -133,7 +137,7 @@ void main() {
     color = mix(color, colAxisZ, axisZLine * colAxisZ.a);
 
     // Distance fade — prevent aliasing at horizon
-    float fade = 1.0 - smoothstep(400.0, 800.0, dist);
+    float fade = 1.0 - smoothstep(fogStart, fogEnd, dist);
     color = mix(ground, color, fade);
 
     color.a = 1.0;

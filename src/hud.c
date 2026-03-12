@@ -350,9 +350,15 @@ static void draw_secondary_row(const hud_t *h, const vehicle_t *pv, int pidx,
 void hud_draw(const hud_t *h, const vehicle_t *vehicles,
               const data_source_t *sources, int vehicle_count,
               int selected, int screen_w, int screen_h, view_mode_t view_mode,
-              bool is_underwater,
+              bool is_underwater, int trail_mode,
               const float *marker_times_arr, const char (*marker_labels_arr)[48],
-              int marker_count_in, int current_marker_in) {
+              int marker_count_in, int current_marker_in,
+              const float *marker_roll, const float *marker_pitch,
+              const float *marker_vert, const float *marker_speed, float marker_speed_max,
+              const float *sys_marker_times_arr, const char (*sys_marker_labels_arr)[48],
+              int sys_marker_count_in, int current_sys_marker_in, bool sys_marker_selected_in,
+              const float *sys_marker_roll, const float *sys_marker_pitch,
+              const float *sys_marker_vert, const float *sys_marker_speed) {
 
     bool rez = (view_mode == VIEW_REZ);
     bool synth = (view_mode == VIEW_1988);
@@ -497,9 +503,20 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
                 (Rectangle){prog_x, prog_y, fill_w, prog_h},
                 0.5f, 4, accent);
         }
-        // Playhead dot
+        // Playhead ring — colored to match the drone's current trail color
         float dot_x = prog_x + prog_w * pb->progress;
-        DrawCircle((int)dot_x, (int)(prog_y + prog_h / 2.0f), 3 * s, accent);
+        float dot_y = prog_y + prog_h / 2.0f;
+        {
+            const vehicle_t *pv = &vehicles[selected];
+            Color ph_col = vehicle_marker_color(pv->roll_deg, pv->pitch_deg,
+                                                pv->vertical_speed,
+                                                sqrtf(pv->ground_speed * pv->ground_speed +
+                                                      pv->vertical_speed * pv->vertical_speed),
+                                                pv->trail_speed_max, view_mode, trail_mode);
+            float r_outer = 6.5f * s;
+            float r_inner = 5.5f * s;
+            DrawRing((Vector2){dot_x, dot_y}, r_inner, r_outer, 0, 360, 24, ph_col);
+        }
 
         // Flight mode markers on timeline
         if (pb->mode_changes && pb->mode_change_count > 0 && pb->duration_s > 0.0f) {
@@ -543,10 +560,24 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
                 float my = prog_y + prog_h / 2.0f;
 
                 bool is_cur = (i == current_marker_in);
-                Color mc = is_cur ? (Color){0, 255, 255, 255} : (Color){255, 160, 40, 220};
+                Color mc = vehicle_marker_color(marker_roll[i], marker_pitch[i],
+                                                marker_vert[i], marker_speed[i],
+                                                marker_speed_max, view_mode, trail_mode);
+                if (is_cur) {
+                    if (snow) {
+                        mc.r = (unsigned char)(mc.r * 0.55f);
+                        mc.g = (unsigned char)(mc.g * 0.55f);
+                        mc.b = (unsigned char)(mc.b * 0.55f);
+                    } else {
+                        mc.r = (unsigned char)(mc.r + (230 - mc.r) * 0.7f);
+                        mc.g = (unsigned char)(mc.g + (230 - mc.g) * 0.7f);
+                        mc.b = (unsigned char)(mc.b + (230 - mc.b) * 0.7f);
+                    }
+                }
+                mc.a = is_cur ? 255 : 220;
 
-                // Diamond shape
-                float d = 3.5f * s;
+                // Diamond shape (selected is larger)
+                float d = is_cur ? 5.0f * s : 3.5f * s;
                 Vector2 diamond[4] = {
                     {mx, my - d},     // top
                     {mx + d, my},     // right
@@ -556,21 +587,90 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
                 DrawTriangle(diamond[0], diamond[3], diamond[1], mc);
                 DrawTriangle(diamond[1], diamond[3], diamond[2], mc);
 
-                // Label below timeline (skip if too close to previous)
-                if (mx - last_mlabel_x > 30 * s) {
+                // Label below timeline — selected always shown, others skip if overlapping
+                {
                     char mlbl[56];
                     if (marker_labels_arr && marker_labels_arr[i][0] != '\0')
                         snprintf(mlbl, sizeof(mlbl), "%d:%s", i + 1, marker_labels_arr[i]);
                     else
                         snprintf(mlbl, sizeof(mlbl), "%d", i + 1);
                     Vector2 mlw = MeasureTextEx(h->font_label, mlbl, fs_mlabel, 0.5f);
-                    float lx = mx - mlw.x / 2.0f;
-                    if (lx < prog_x) lx = prog_x;
-                    if (lx + mlw.x > prog_x + prog_w) lx = prog_x + prog_w - mlw.x;
-                    DrawTextEx(h->font_label, mlbl,
-                               (Vector2){lx, prog_y + prog_h + 3 * s},
-                               fs_mlabel, 0.5f, mc);
-                    last_mlabel_x = mx;
+                    float min_gap = is_cur ? 0 : (mlw.x + 6 * s);
+                    if (is_cur || mx - last_mlabel_x > min_gap) {
+                        float lx = mx - mlw.x / 2.0f;
+                        if (lx < prog_x) lx = prog_x;
+                        if (lx + mlw.x > prog_x + prog_w) lx = prog_x + prog_w - mlw.x;
+                        float ly = prog_y + prog_h + 3 * s;
+                        // Background pill for selected label
+                        if (is_cur) {
+                            float px = 4 * s, py = 2 * s;
+                            DrawRectangleRounded(
+                                (Rectangle){lx - px, ly - py, mlw.x + px * 2, mlw.y + py * 2},
+                                0.4f, 4, bg);
+                        }
+                        DrawTextEx(h->font_label, mlbl,
+                                   (Vector2){lx, ly}, fs_mlabel, 0.5f, mc);
+                        last_mlabel_x = mx;
+                    }
+                }
+            }
+        }
+
+        // System markers on timeline (squares)
+        if (sys_marker_times_arr && sys_marker_count_in > 0 && pb->duration_s > 0.0f) {
+            float fs_mlabel = 9 * s;
+            float last_slabel_x = -100.0f;
+            for (int i = 0; i < sys_marker_count_in; i++) {
+                float t = sys_marker_times_arr[i] / pb->duration_s;
+                if (t < 0.0f || t > 1.0f) continue;
+                float mx = prog_x + prog_w * t;
+                float my = prog_y + prog_h / 2.0f;
+
+                bool is_cur = sys_marker_selected_in && (i == current_sys_marker_in);
+                Color mc = vehicle_marker_color(sys_marker_roll[i], sys_marker_pitch[i],
+                                                sys_marker_vert[i], sys_marker_speed[i],
+                                                marker_speed_max, view_mode, trail_mode);
+                if (is_cur) {
+                    if (snow) {
+                        mc.r = (unsigned char)(mc.r * 0.55f);
+                        mc.g = (unsigned char)(mc.g * 0.55f);
+                        mc.b = (unsigned char)(mc.b * 0.55f);
+                    } else {
+                        mc.r = (unsigned char)(mc.r + (230 - mc.r) * 0.7f);
+                        mc.g = (unsigned char)(mc.g + (230 - mc.g) * 0.7f);
+                        mc.b = (unsigned char)(mc.b + (230 - mc.b) * 0.7f);
+                    }
+                }
+                mc.a = is_cur ? 255 : 200;
+
+                // Square shape (selected is larger)
+                float d = is_cur ? 5.0f * s : 3.5f * s;
+                DrawRectangle((int)(mx - d), (int)(my - d), (int)(d * 2), (int)(d * 2), mc);
+
+                // Label below timeline
+                {
+                    char mlbl[56];
+                    if (sys_marker_labels_arr && sys_marker_labels_arr[i][0] != '\0')
+                        snprintf(mlbl, sizeof(mlbl), "S:%s", sys_marker_labels_arr[i]);
+                    else
+                        snprintf(mlbl, sizeof(mlbl), "S%d", i + 1);
+                    Vector2 mlw = MeasureTextEx(h->font_label, mlbl, fs_mlabel, 0.5f);
+                    float min_gap = is_cur ? 0 : (mlw.x + 6 * s);
+                    if (is_cur || mx - last_slabel_x > min_gap) {
+                        float lx = mx - mlw.x / 2.0f;
+                        if (lx < prog_x) lx = prog_x;
+                        if (lx + mlw.x > prog_x + prog_w) lx = prog_x + prog_w - mlw.x;
+                        float ly = prog_y - mlw.y - 3 * s;  // above timeline (user markers go below)
+                        if (is_cur) {
+                            float px = 4 * s, py = 2 * s;
+                            DrawRectangleRounded(
+                                (Rectangle){lx - px, ly - py, mlw.x + px * 2, mlw.y + py * 2},
+                                0.4f, 4, bg);
+                        }
+                        DrawTextEx(h->font_label, mlbl,
+                                   (Vector2){lx, ly}, fs_mlabel, 0.5f, mc);
+                        last_slabel_x = mx;
+                    }
                 }
             }
         }
@@ -899,7 +999,8 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
             {"<-/->",       "Seek 5s"},
             {"Sh+<-/->",    "Frame step"},
             {"Ctrl+Sh+<->", "Seek 1s"},
-            {"L",           "Toggle loop"},
+            {"L",           "Toggle labels"},
+            {"Sh+L",        "Toggle loop"},
             {"I",           "Interpolation"},
             {"R",           "Restart"},
             {NULL,          "MARKERS"},
