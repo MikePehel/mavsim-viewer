@@ -36,8 +36,87 @@
           return pmc.WorkingSetSize / (1024 * 1024);
       return 0;
   }
+
+  // CPU utilization via GetProcessTimes (kernel + user time)
+  typedef struct { unsigned long dwLowDateTime; unsigned long dwHighDateTime; } FILETIME_T;
+  __declspec(dllimport) int __stdcall GetProcessTimes(void*, FILETIME_T*, FILETIME_T*, FILETIME_T*, FILETIME_T*);
+  __declspec(dllimport) int __stdcall QueryPerformanceCounter(int64_t*);
+  __declspec(dllimport) int __stdcall QueryPerformanceFrequency(int64_t*);
+
+  static uint64_t filetime_to_u64(FILETIME_T ft) {
+      return ((uint64_t)ft.dwHighDateTime << 32) | (uint64_t)ft.dwLowDateTime;
+  }
+
+  typedef struct {
+      int64_t wall_start;
+      uint64_t cpu_start;   // kernel + user time in 100ns units
+  } cpu_sample_t;
+
+  static void cpu_sample_begin(cpu_sample_t *s) {
+      FILETIME_T create, ex, kern, user;
+      GetProcessTimes(GetCurrentProcess(), &create, &ex, &kern, &user);
+      s->cpu_start = filetime_to_u64(kern) + filetime_to_u64(user);
+      QueryPerformanceCounter(&s->wall_start);
+  }
+
+  static float cpu_sample_end_pct(const cpu_sample_t *s) {
+      FILETIME_T create, ex, kern, user;
+      GetProcessTimes(GetCurrentProcess(), &create, &ex, &kern, &user);
+      uint64_t cpu_end = filetime_to_u64(kern) + filetime_to_u64(user);
+      int64_t wall_end;
+      QueryPerformanceCounter(&wall_end);
+      int64_t freq;
+      QueryPerformanceFrequency(&freq);
+      double wall_s = (double)(wall_end - s->wall_start) / (double)freq;
+      double cpu_s  = (double)(cpu_end - s->cpu_start) / 1e7;
+      if (wall_s <= 0.0) return 0.0f;
+      return (float)(cpu_s / wall_s * 100.0);
+  }
+
+  // High-resolution timer for frame phase breakdown
+  static double qpc_now_ms(void) {
+      int64_t now, freq;
+      QueryPerformanceCounter(&now);
+      QueryPerformanceFrequency(&freq);
+      return (double)now / (double)freq * 1000.0;
+  }
+
+  // VRAM query via NVIDIA OpenGL extension (best-effort)
+  #pragma comment(lib, "opengl32.lib")
+  extern void __stdcall glGetIntegerv(unsigned int pname, int *data);
+  extern unsigned int __stdcall glGetError(void);
+  // VRAM query: try NVIDIA NVX extension, then AMD ATI extension
+  #define GL_GPU_MEM_TOTAL_NVX  0x9048
+  #define GL_GPU_MEM_AVAIL_NVX  0x9049
+  #define GL_VBO_FREE_MEMORY_ATI 0x87FB
+  #define GL_TEXTURE_FREE_MEMORY_ATI 0x87FC
+  static size_t get_vram_used_mb(void) {
+      int total_kb = 0, avail_kb = 0;
+      glGetError();
+      // Try NVIDIA NVX
+      glGetIntegerv(GL_GPU_MEM_TOTAL_NVX, &total_kb);
+      if (glGetError() == 0 && total_kb > 0) {
+          glGetIntegerv(GL_GPU_MEM_AVAIL_NVX, &avail_kb);
+          if (glGetError() == 0 && avail_kb >= 0)
+              return (size_t)(total_kb - avail_kb) / 1024;
+      }
+      // Try AMD ATI_meminfo: returns [total_free, largest_free, total_aux_free, largest_aux_free] in KB
+      glGetError();
+      int ati_info[4] = {0};
+      glGetIntegerv(GL_TEXTURE_FREE_MEMORY_ATI, ati_info);
+      if (glGetError() == 0 && ati_info[0] > 0) {
+          // ATI reports free VRAM, not used. Return free so we can compute deltas.
+          return (size_t)ati_info[0] / 1024;
+      }
+      return 0;
+  }
 #else
   static size_t get_process_memory_mb(void) { return 0; }
+  typedef struct { int64_t wall_start; uint64_t cpu_start; } cpu_sample_t;
+  static void cpu_sample_begin(cpu_sample_t *s) { (void)s; }
+  static float cpu_sample_end_pct(const cpu_sample_t *s) { (void)s; return 0.0f; }
+  static double qpc_now_ms(void) { return 0.0; }
+  static size_t get_vram_used_mb(void) { return 0; }
 #endif
 
 #define MAX_VEHICLES 65
@@ -354,6 +433,7 @@ int main(int argc, char *argv[]) {
     int bench_ortho = 0;            // 0 = perspective, 1 = ORTHO_TOP
     int bench_sidebar = 0;          // 0 = off, 1 = sidebar ortho panels
     const char *bench_outfile = NULL;
+    const char *bench_logfile = NULL;  // ULG log for replay-based benchmarks
     bool fake_mode = false;
 
     for (int i = 1; i < argc; i++) {
@@ -415,6 +495,15 @@ int main(int argc, char *argv[]) {
             bench_ortho = 1;
         } else if (strcmp(argv[i], "-benchsidebar") == 0) {
             bench_sidebar = 1;
+        } else if (strcmp(argv[i], "-benchlog") == 0 && i + 1 < argc) {
+            bench_logfile = argv[++i];
+            bench_mode = true;
+            if (bench_count == 0) bench_count = 16;
+        } else if (strcmp(argv[i], "-benchn") == 0 && i + 1 < argc) {
+            bench_mode = true;
+            bench_count = atoi(argv[++i]);
+            if (bench_count < 1) bench_count = 1;
+            if (bench_count > BENCH_COUNT) bench_count = BENCH_COUNT;
         } else if (strcmp(argv[i], "-fake") == 0) {
             fake_mode = true;
         } else if (strcmp(argv[i], "--help") == 0) {
@@ -428,7 +517,10 @@ int main(int argc, char *argv[]) {
     // Init Raylib
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
     InitWindow(win_w, win_h, "MAVSim Viewer");
-    SetTargetFPS(60);
+    if (bench_mode && bench_duration > 0.0f)
+        SetTargetFPS(0);   // uncap for accurate profiling
+    else
+        SetTargetFPS(60);
 
     // Init data sources
     data_source_t sources[MAX_VEHICLES];
@@ -444,12 +536,46 @@ int main(int argc, char *argv[]) {
         origin_specified = true; // force shared origin
     }
 
-    // Benchmark mode: drones in figure-eights
+    // Benchmark mode: drones in figure-eights (synthetic) or ULG replay
     bench_params_t bench_params[BENCH_COUNT];
     float bench_time = 0.0f;
+    ulog_replay_ctx_t *bench_replays = NULL;
+    float bench_offset_x[BENCH_COUNT];  // East offset per drone (meters)
+    float bench_offset_z[BENCH_COUNT];  // North offset per drone (meters)
+    #define BENCH_LOG_SPACING 12.5f
     if (bench_mode) {
         vehicle_count = bench_count;
-        bench_init(bench_params, bench_count);
+        if (bench_logfile) {
+            // ULG replay-based benchmark: each drone replays the same log
+            bench_replays = (ulog_replay_ctx_t *)calloc(bench_count, sizeof(ulog_replay_ctx_t));
+            int cols = (int)ceilf(sqrtf((float)bench_count));
+            float grid_offset = (cols - 1) * 0.5f;
+            for (int i = 0; i < bench_count; i++) {
+                if (ulog_replay_init(&bench_replays[i], bench_logfile) != 0) {
+                    fprintf(stderr, "Failed to open ULog for bench drone %d: %s\n", i, bench_logfile);
+                    free(bench_replays); bench_replays = NULL;
+                    CloseWindow(); return 1;
+                }
+                int row = i / cols;
+                int col = i % cols;
+                bench_offset_x[i] = (col - grid_offset) * BENCH_LOG_SPACING;
+                bench_offset_z[i] = (row - grid_offset) * BENCH_LOG_SPACING;
+            }
+            // Derive NED origin from the log's home position
+            ulog_replay_advance(&bench_replays[0], 5.0f, 1.0f, false, false);
+            if (bench_replays[0].home.valid) {
+                origin_lat = (double)bench_replays[0].home.lat / 1e7;
+                origin_lon = (double)bench_replays[0].home.lon / 1e7;
+                origin_alt = (double)bench_replays[0].home.alt / 1000.0;
+            }
+            // Rewind all replays to start
+            for (int i = 0; i < bench_count; i++)
+                ulog_replay_seek(&bench_replays[i], 0.0f);
+            printf("Bench: ULG replay with %d drones, grid %dx%d @ %.0fm spacing\n",
+                   bench_count, cols, (bench_count + cols - 1) / cols, BENCH_LOG_SPACING);
+        } else {
+            bench_init(bench_params, bench_count);
+        }
         origin_specified = true;
     }
 
@@ -490,8 +616,9 @@ int main(int argc, char *argv[]) {
         vehicle_init(&vehicles[MISSILE_COUNT], MODEL_VTOL, scene.lighting_shader);
         vehicles[MISSILE_COUNT].color = vehicle_color(MISSILE_COUNT);
     } else if (bench_mode) {
+        int bench_model = bench_replays ? MODEL_VTOL : MODEL_QUADROTOR;
         for (int i = 0; i < bench_count; i++) {
-            vehicle_init(&vehicles[i], MODEL_QUADROTOR, scene.lighting_shader);
+            vehicle_init(&vehicles[i], bench_model, scene.lighting_shader);
             vehicles[i].color = vehicle_color(i);
         }
     } else {
@@ -545,6 +672,10 @@ int main(int argc, char *argv[]) {
     bool classic_colors = false;     // L key: toggle classic (red/blue) vs modern (yellow/purple)
     bool missile_paused = false;
 
+    // Bench replay playback controls
+    float bench_replay_speed = 1.0f;
+    bool bench_replay_paused = false;
+
     // Benchmark instrumentation
     if (bench_trail_mode >= 0) trail_mode = bench_trail_mode;
     if (bench_underwater == 1) scene.is_underwater = true;
@@ -563,28 +694,39 @@ int main(int argc, char *argv[]) {
     if (bench_mode && bench_duration > 0.0f && !bench_ortho) {
         scene.cam_mode = CAM_MODE_FREE;
         int cols = (int)ceilf(sqrtf((float)bench_count));
-        float grid_sp = BENCH_RADIUS * 2.5f;
-        float extent = cols * grid_sp;  // total grid width
-        // Position: behind (+Z), above, looking at center
-        float cam_dist = extent * 1.2f + BENCH_RADIUS * 2.0f;
-        float cam_height = extent * 0.6f + 40.0f;
+        float grid_sp = bench_replays ? BENCH_LOG_SPACING : (BENCH_RADIUS * 2.5f);
+        float extent = cols * grid_sp;
+        float cam_dist = extent * 0.5f + 30.0f;
+        float cam_height = extent * 0.25f + 25.0f;
         scene.camera.position = (Vector3){ 0.0f, cam_height, cam_dist };
-        scene.camera.target = (Vector3){ 0.0f, BENCH_RADIUS + 10.0f, 0.0f };
+        scene.camera.target = (Vector3){ 0.0f, 15.0f, 0.0f };
         scene.camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
     }
 
     #define BENCH_MAX_SAMPLES 4096
     float bench_fps_samples[BENCH_MAX_SAMPLES];
+    float bench_ft_samples[BENCH_MAX_SAMPLES];   // frame time in ms
     int bench_sample_count = 0;
     float bench_elapsed = 0.0f;
     float bench_sample_timer = 0.0f;
     float bench_fps_min = 9999.0f, bench_fps_max = 0.0f, bench_fps_sum = 0.0f;
+    float bench_ft_min = 9999.0f, bench_ft_max = 0.0f, bench_ft_sum = 0.0f;
+    // CPU% tracking
+    cpu_sample_t bench_cpu_sample;
+    float bench_cpu_pct_sum = 0.0f;
+    int bench_cpu_count = 0;
+    // Phase timing accumulators (ms)
+    double bench_update_sum = 0.0, bench_draw_sum = 0.0;
+    int bench_phase_count = 0;
+    if (bench_mode && bench_duration > 0.0f)
+        cpu_sample_begin(&bench_cpu_sample);
 
     // Main loop
     while (!WindowShouldClose()) {
-        // Benchmark: collect FPS and auto-exit
+        // Benchmark: collect FPS, frame time, CPU% and auto-exit
         if (bench_duration > 0.0f) {
             float dt = GetFrameTime();
+            float ft_ms = dt * 1000.0f;
             bench_elapsed += dt;
             bench_sample_timer += dt;
             if (bench_elapsed > 2.0f) { // skip first 2s warmup
@@ -592,15 +734,26 @@ int main(int argc, char *argv[]) {
                 if (bench_sample_timer >= 0.1f) { // sample every 100ms
                     bench_sample_timer = 0.0f;
                     if (bench_sample_count < BENCH_MAX_SAMPLES) {
-                        bench_fps_samples[bench_sample_count++] = fps;
+                        bench_fps_samples[bench_sample_count] = fps;
+                        bench_ft_samples[bench_sample_count] = ft_ms;
+                        bench_sample_count++;
                     }
                     bench_fps_sum += fps;
                     if (fps < bench_fps_min) bench_fps_min = fps;
                     if (fps > bench_fps_max) bench_fps_max = fps;
+                    bench_ft_sum += ft_ms;
+                    if (ft_ms < bench_ft_min) bench_ft_min = ft_ms;
+                    if (ft_ms > bench_ft_max) bench_ft_max = ft_ms;
+                    // CPU% snapshot every second
+                    bench_cpu_count++;
+                    if (bench_cpu_count % 10 == 0) {
+                        bench_cpu_pct_sum += cpu_sample_end_pct(&bench_cpu_sample);
+                        cpu_sample_begin(&bench_cpu_sample);
+                    }
                 }
             }
             if (bench_elapsed >= bench_duration + 2.0f) { // +2s for warmup
-                // Sort for percentiles
+                // Sort FPS samples for percentiles
                 for (int i = 0; i < bench_sample_count - 1; i++)
                     for (int j = i + 1; j < bench_sample_count; j++)
                         if (bench_fps_samples[i] > bench_fps_samples[j]) {
@@ -608,34 +761,67 @@ int main(int argc, char *argv[]) {
                             bench_fps_samples[i] = bench_fps_samples[j];
                             bench_fps_samples[j] = tmp;
                         }
-                float avg = bench_sample_count > 0 ? bench_fps_sum / bench_sample_count : 0;
-                float p1  = bench_sample_count > 0 ? bench_fps_samples[(int)(bench_sample_count * 0.01f)] : 0;
-                float p5  = bench_sample_count > 0 ? bench_fps_samples[(int)(bench_sample_count * 0.05f)] : 0;
-                float med = bench_sample_count > 0 ? bench_fps_samples[bench_sample_count / 2] : 0;
+                // Sort frame time samples for percentiles
+                float ft_sorted[BENCH_MAX_SAMPLES];
+                memcpy(ft_sorted, bench_ft_samples, bench_sample_count * sizeof(float));
+                for (int i = 0; i < bench_sample_count - 1; i++)
+                    for (int j = i + 1; j < bench_sample_count; j++)
+                        if (ft_sorted[i] > ft_sorted[j]) {
+                            float tmp = ft_sorted[i];
+                            ft_sorted[i] = ft_sorted[j];
+                            ft_sorted[j] = tmp;
+                        }
 
+                int n = bench_sample_count;
+                float fps_avg = n > 0 ? bench_fps_sum / n : 0;
+                float fps_p1  = n > 0 ? bench_fps_samples[(int)(n * 0.01f)] : 0;
+                float fps_p5  = n > 0 ? bench_fps_samples[(int)(n * 0.05f)] : 0;
+                float fps_med = n > 0 ? bench_fps_samples[n / 2] : 0;
+
+                float ft_avg = n > 0 ? bench_ft_sum / n : 0;
+                float ft_p50 = n > 0 ? ft_sorted[n / 2] : 0;
+                float ft_p95 = n > 0 ? ft_sorted[(int)(n * 0.95f)] : 0;
+                float ft_p99 = n > 0 ? ft_sorted[(int)(n * 0.99f)] : 0;
+
+                int cpu_snapshots = bench_cpu_count / 10;
+                float cpu_pct = cpu_snapshots > 0 ? bench_cpu_pct_sum / cpu_snapshots : 0;
                 size_t mem_mb = get_process_memory_mb();
+                size_t vram_mb = get_vram_used_mb();
                 int render_w = GetRenderWidth();
                 int render_h = GetRenderHeight();
+                float update_avg = bench_phase_count > 0 ? (float)(bench_update_sum / bench_phase_count) : 0;
+                float draw_avg = bench_phase_count > 0 ? (float)(bench_draw_sum / bench_phase_count) : 0;
 
                 if (bench_outfile) {
                     FILE *f = fopen(bench_outfile, "a");
                     if (f) {
-                        fprintf(f, "%d,%d,%d,%d,%d,%d,%dx%d,%dx%d,%zu,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%d\n",
+                        fprintf(f, "%d,%d,%d,%d,%d,%d,%dx%d,%dx%d,"
+                                   "%zu,%zu,%.1f,"
+                                   "%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,"
+                                   "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,"
+                                   "%.3f,%.3f,%d\n",
                                 bench_count, bench_trail_mode, bench_underwater == 1 ? 1 : 0,
                                 bench_view >= 0 ? bench_view : 0, bench_ortho, bench_sidebar,
-                                GetScreenWidth(), GetScreenHeight(),
-                                render_w, render_h, mem_mb,
-                                bench_fps_min, p1, p5, med, avg, bench_fps_max,
-                                bench_sample_count);
+                                GetScreenWidth(), GetScreenHeight(), render_w, render_h,
+                                mem_mb, vram_mb, cpu_pct,
+                                bench_fps_min, fps_p1, fps_p5, fps_med, fps_avg, bench_fps_max,
+                                bench_ft_min, ft_p50, ft_p95, ft_p99, ft_avg, bench_ft_max,
+                                update_avg, draw_avg, n);
                         fclose(f);
                     }
                 }
-                printf("BENCH: drones=%d trail=%d uw=%d view=%d res=%dx%d fb=%dx%d mem=%zuMB | "
-                       "FPS min=%.1f 1%%=%.1f 5%%=%.1f med=%.1f avg=%.1f max=%.1f (n=%d)\n",
+                printf("BENCH: drones=%d trail=%d uw=%d view=%d res=%dx%d fb=%dx%d\n"
+                       "  MEM=%zuMB VRAM=%zuMB CPU=%.1f%%\n"
+                       "  FPS: min=%.1f 1%%=%.1f 5%%=%.1f med=%.1f avg=%.1f max=%.1f\n"
+                       "  FT:  min=%.3f p50=%.3f p95=%.3f p99=%.3f avg=%.3f max=%.3fms\n"
+                       "  update=%.3fms draw=%.3fms (n=%d)\n",
                        bench_count, trail_mode, scene.is_underwater ? 1 : 0,
                        (int)scene.view_mode, GetScreenWidth(), GetScreenHeight(),
-                       render_w, render_h, mem_mb,
-                       bench_fps_min, p1, p5, med, avg, bench_fps_max, bench_sample_count);
+                       render_w, render_h,
+                       mem_mb, vram_mb, cpu_pct,
+                       bench_fps_min, fps_p1, fps_p5, fps_med, fps_avg, bench_fps_max,
+                       bench_ft_min, ft_p50, ft_p95, ft_p99, ft_avg, bench_ft_max,
+                       update_avg, draw_avg, n);
                 break;
             }
         }
@@ -712,14 +898,87 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        // Benchmark mode: drones in vertical figure-eights
+        // Bench replay playback controls (only when not auto-benchmarking)
+        if (bench_mode && bench_replays && bench_duration <= 0.0f) {
+            if (IsKeyPressed(KEY_SPACE)) bench_replay_paused = !bench_replay_paused;
+            if (IsKeyPressed(KEY_EQUAL)) {
+                if (bench_replay_speed < 0.5f) bench_replay_speed = 0.5f;
+                else if (bench_replay_speed < 1.0f) bench_replay_speed = 1.0f;
+                else if (bench_replay_speed < 2.0f) bench_replay_speed = 2.0f;
+                else if (bench_replay_speed < 4.0f) bench_replay_speed = 4.0f;
+                else if (bench_replay_speed < 8.0f) bench_replay_speed = 8.0f;
+                else bench_replay_speed = 16.0f;
+                printf("Replay speed: %.1fx\n", bench_replay_speed);
+            }
+            if (IsKeyPressed(KEY_MINUS)) {
+                if (bench_replay_speed > 8.0f) bench_replay_speed = 8.0f;
+                else if (bench_replay_speed > 4.0f) bench_replay_speed = 4.0f;
+                else if (bench_replay_speed > 2.0f) bench_replay_speed = 2.0f;
+                else if (bench_replay_speed > 1.0f) bench_replay_speed = 1.0f;
+                else if (bench_replay_speed > 0.5f) bench_replay_speed = 0.5f;
+                else bench_replay_speed = 0.25f;
+                printf("Replay speed: %.2fx\n", bench_replay_speed);
+            }
+            if (IsKeyPressed(KEY_R)) {
+                for (int i = 0; i < bench_count; i++) {
+                    ulog_replay_seek(&bench_replays[i], 0.0f);
+                    vehicle_reset_trail(&vehicles[i]);
+                }
+                printf("Replay: rewound to start\n");
+            }
+            if (IsKeyPressed(KEY_RIGHT)) {
+                float step = (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) ? 30.0f : 5.0f;
+                float pos = (float)bench_replays[0].wall_accum + step;
+                for (int i = 0; i < bench_count; i++) {
+                    ulog_replay_seek(&bench_replays[i], pos);
+                    vehicle_reset_trail(&vehicles[i]);
+                }
+                printf("Replay: skip to %.0fs\n", pos);
+            }
+            if (IsKeyPressed(KEY_LEFT)) {
+                float step = (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) ? 30.0f : 5.0f;
+                float pos = (float)bench_replays[0].wall_accum - step;
+                if (pos < 0.0f) pos = 0.0f;
+                for (int i = 0; i < bench_count; i++) {
+                    ulog_replay_seek(&bench_replays[i], pos);
+                    vehicle_reset_trail(&vehicles[i]);
+                }
+                printf("Replay: skip to %.0fs\n", pos);
+            }
+        }
+
+        // Benchmark mode: ULG replay or synthetic figure-eights
         if (bench_mode) {
-            bench_time += GetFrameTime();
-            for (int i = 0; i < bench_count; i++) {
-                hil_state_t state = {0};
-                bench_state(&bench_params[i], bench_time, &state);
-                vehicle_update(&vehicles[i], &state, NULL);
-                vehicles[i].active = true;
+            double t_update_start = qpc_now_ms();
+            float bdt = GetFrameTime();
+            if (bench_replay_paused && bench_replays) bdt = 0.0f;
+            bench_time += bdt;
+            if (bench_replays) {
+                // ULG replay with X/Z offset per drone
+                double ref_lat_rad = origin_lat * (M_PI / 180.0);
+                double mpd_lat = 111132.0;
+                double mpd_lon = 111132.0 * cos(ref_lat_rad);
+                for (int i = 0; i < bench_count; i++) {
+                    ulog_replay_advance(&bench_replays[i], bdt, bench_replay_speed, true, true);
+                    hil_state_t state = bench_replays[i].state;
+                    // Apply grid offset to lat/lon
+                    state.lat += (int32_t)(bench_offset_z[i] / mpd_lat * 1e7);
+                    state.lon += (int32_t)(bench_offset_x[i] / mpd_lon * 1e7);
+                    vehicle_update(&vehicles[i], &state, NULL);
+                    vehicles[i].active = state.valid;
+                }
+            } else {
+                for (int i = 0; i < bench_count; i++) {
+                    hil_state_t state = {0};
+                    bench_state(&bench_params[i], bench_time, &state);
+                    vehicle_update(&vehicles[i], &state, NULL);
+                    vehicles[i].active = true;
+                }
+            }
+            double t_update_end = qpc_now_ms();
+            if (bench_elapsed > 2.0f) {
+                bench_update_sum += (t_update_end - t_update_start);
+                bench_phase_count++;
             }
         }
 
@@ -1038,6 +1297,7 @@ int main(int argc, char *argv[]) {
         }
 
         // Render
+        double t_draw_start = qpc_now_ms();
         BeginDrawing();
 
             // Sky background
@@ -1089,6 +1349,17 @@ int main(int argc, char *argv[]) {
                 scene.ortho_mode, scene.ortho_span, scene.view_mode, hud.font_label);
 
         EndDrawing();
+        if (bench_mode && bench_duration > 0.0f && bench_elapsed > 2.0f) {
+            double t_draw_end = qpc_now_ms();
+            bench_draw_sum += (t_draw_end - t_draw_start);
+        }
+    }
+
+    // Cleanup bench replays
+    if (bench_replays) {
+        for (int i = 0; i < bench_count; i++)
+            ulog_replay_close(&bench_replays[i]);
+        free(bench_replays);
     }
 
     // Cleanup

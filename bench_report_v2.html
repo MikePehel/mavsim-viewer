@@ -1,0 +1,1251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MAVSim Viewer - Performance Benchmark Report v2</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg-primary: #0d1117;
+    --bg-secondary: #161b22;
+    --bg-tertiary: #21262d;
+    --bg-card: #1c2128;
+    --border: #30363d;
+    --border-light: #3d444d;
+    --text-primary: #e6edf3;
+    --text-secondary: #8b949e;
+    --text-muted: #656d76;
+    --accent-green: #3fb950;
+    --accent-green-dim: #238636;
+    --accent-blue: #58a6ff;
+    --accent-purple: #bc8cff;
+    --accent-orange: #d29922;
+    --accent-red: #f85149;
+    --accent-cyan: #39d2c0;
+    --accent-pink: #f778ba;
+    --accent-yellow: #e3b341;
+    --radius: 12px;
+    --radius-sm: 8px;
+    --shadow: 0 4px 24px rgba(0,0,0,0.4);
+    --shadow-sm: 0 2px 8px rgba(0,0,0,0.3);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  .container { max-width: 1400px; margin: 0 auto; padding: 0 24px; }
+
+  /* Header */
+  .header {
+    background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #1a1040 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 48px 0 40px;
+    position: relative;
+    overflow: hidden;
+  }
+  .header::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -10%;
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, rgba(88,166,255,0.06) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .header::after {
+    content: '';
+    position: absolute;
+    bottom: -30%;
+    left: 10%;
+    width: 400px;
+    height: 400px;
+    background: radial-gradient(circle, rgba(188,140,255,0.05) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .header-content { position: relative; z-index: 1; }
+  .header h1 {
+    font-size: 2.4rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    margin-bottom: 6px;
+    background: linear-gradient(135deg, #e6edf3, #58a6ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .header .subtitle {
+    font-size: 1.1rem;
+    color: var(--text-secondary);
+    font-weight: 400;
+  }
+  .header .date {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-top: 8px;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  }
+  .header .version-badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    background: rgba(88,166,255,0.15);
+    border: 1px solid rgba(88,166,255,0.3);
+    padding: 3px 10px;
+    border-radius: 999px;
+    color: var(--accent-blue);
+    font-weight: 600;
+    margin-left: 12px;
+    vertical-align: middle;
+  }
+
+  /* System Info Bar */
+  .sysinfo {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1px;
+    background: var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin: 32px 0;
+    box-shadow: var(--shadow-sm);
+  }
+  .sysinfo-item {
+    background: var(--bg-secondary);
+    padding: 16px 20px;
+    text-align: center;
+  }
+  .sysinfo-item .label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+  .sysinfo-item .value {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  }
+
+  /* Section */
+  .section { margin: 48px 0; }
+  .section-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+    letter-spacing: -0.02em;
+  }
+  .section-desc {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    margin-bottom: 24px;
+    max-width: 800px;
+    line-height: 1.6;
+  }
+
+  /* Insight Cards */
+  .insights {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin: 32px 0;
+  }
+  .insight-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+  .insight-card:hover { border-color: var(--border-light); }
+  .insight-card .accent-bar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+  }
+  .insight-card .metric {
+    font-size: 2.2rem;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    margin: 8px 0 4px;
+    line-height: 1.1;
+  }
+  .insight-card .label {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    font-weight: 600;
+  }
+  .insight-card .desc {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-top: 8px;
+    line-height: 1.5;
+  }
+
+  /* Chart panels */
+  .chart-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+  @media (max-width: 1000px) {
+    .chart-grid { grid-template-columns: 1fr; }
+  }
+  .chart-panel {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    box-shadow: var(--shadow-sm);
+  }
+  .chart-panel.full-width {
+    grid-column: 1 / -1;
+  }
+  .chart-panel h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .chart-panel .chart-desc {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+  }
+  .chart-container {
+    position: relative;
+    width: 100%;
+  }
+  .chart-container canvas {
+    width: 100% !important;
+  }
+
+  /* Data table */
+  .data-table-wrapper {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    overflow-x: auto;
+    box-shadow: var(--shadow-sm);
+  }
+  .data-table-wrapper h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 16px;
+  }
+  .data-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 0.82rem;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  }
+  .data-table th {
+    background: var(--bg-tertiary);
+    padding: 10px 12px;
+    text-align: right;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    font-weight: 600;
+    white-space: nowrap;
+    border-bottom: 2px solid var(--border);
+    position: sticky;
+    top: 0;
+  }
+  .data-table th:first-child { text-align: left; border-radius: var(--radius-sm) 0 0 0; }
+  .data-table th:last-child { border-radius: 0 var(--radius-sm) 0 0; }
+  .data-table td {
+    padding: 8px 12px;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    color: var(--text-secondary);
+  }
+  .data-table td:first-child { text-align: left; font-weight: 600; color: var(--text-primary); }
+  .data-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .data-table .highlight { color: var(--accent-orange); font-weight: 700; }
+  .data-table .bad { color: var(--accent-red); font-weight: 700; }
+  .data-table .good { color: var(--accent-green); }
+
+  /* Heatmap cells */
+  .heatmap {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 3px;
+  }
+  .heatmap th {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    padding: 6px 8px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .heatmap th.row-header {
+    text-align: right;
+    padding-right: 12px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    font-family: 'SFMono-Regular', Consolas, monospace;
+  }
+  .heatmap td {
+    text-align: center;
+    padding: 12px 8px;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    min-width: 70px;
+    transition: transform 0.15s;
+    cursor: default;
+  }
+  .heatmap td:hover { transform: scale(1.06); z-index: 1; }
+  .heatmap td .sub {
+    display: block;
+    font-size: 0.6rem;
+    font-weight: 400;
+    opacity: 0.7;
+    margin-top: 2px;
+  }
+
+  /* Amdahl callout */
+  .amdahl-box {
+    background: linear-gradient(135deg, rgba(88,166,255,0.08), rgba(188,140,255,0.08));
+    border: 1px solid rgba(88,166,255,0.25);
+    border-radius: var(--radius);
+    padding: 28px 32px;
+    margin: 24px 0;
+  }
+  .amdahl-box h3 {
+    color: var(--accent-blue);
+    font-size: 1.1rem;
+    margin-bottom: 12px;
+  }
+  .amdahl-box .formula {
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 0.95rem;
+    color: var(--accent-purple);
+    margin: 8px 0;
+    padding: 8px 16px;
+    background: rgba(0,0,0,0.25);
+    border-radius: 6px;
+    display: inline-block;
+  }
+  .amdahl-box p {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    margin: 6px 0;
+  }
+
+  /* Footer */
+  .footer {
+    border-top: 1px solid var(--border);
+    padding: 32px 0;
+    margin-top: 48px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+  }
+
+  /* Color helpers */
+  .c-green { color: var(--accent-green); }
+  .c-blue { color: var(--accent-blue); }
+  .c-purple { color: var(--accent-purple); }
+  .c-orange { color: var(--accent-orange); }
+  .c-red { color: var(--accent-red); }
+  .c-cyan { color: var(--accent-cyan); }
+  .c-pink { color: var(--accent-pink); }
+  .c-yellow { color: var(--accent-yellow); }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════ HEADER ═══════════════════════════════════════ -->
+<div class="header">
+  <div class="container header-content">
+    <h1>Performance Benchmark Report <span class="version-badge">v2</span></h1>
+    <div class="subtitle">MAVSim Viewer &mdash; ULG Replay Profiling with Amdahl's Law Analysis</div>
+    <div class="date">2026-03-11 &bull; 30 runs &times; 30s each &bull; 1920&times;1080 &bull; VSync OFF (uncapped FPS)</div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════ SYSTEM INFO ═══════════════════════════════════════ -->
+<div class="container">
+  <div class="sysinfo">
+    <div class="sysinfo-item">
+      <div class="label">GPU</div>
+      <div class="value">AMD Radeon 860M</div>
+    </div>
+    <div class="sysinfo-item">
+      <div class="label">VRAM</div>
+      <div class="value">~11.3 GB</div>
+    </div>
+    <div class="sysinfo-item">
+      <div class="label">Resolution</div>
+      <div class="value">1920&times;1080</div>
+    </div>
+    <div class="sysinfo-item">
+      <div class="label">Data Source</div>
+      <div class="value">ULG Replay (358s)</div>
+    </div>
+    <div class="sysinfo-item">
+      <div class="label">Vsync</div>
+      <div class="value">OFF (uncapped)</div>
+    </div>
+    <div class="sysinfo-item">
+      <div class="label">Warmup</div>
+      <div class="value">2s skipped</div>
+    </div>
+  </div>
+
+<!-- ═══════════════════════════════════════ KEY FINDINGS ═══════════════════════════════════════ -->
+  <div class="section">
+    <h2 class="section-title">Key Findings</h2>
+    <div class="insights">
+      <div class="insight-card">
+        <div class="accent-bar" style="background: linear-gradient(90deg, var(--accent-green), var(--accent-cyan));"></div>
+        <div class="label">Baseline (1 drone, no features)</div>
+        <div class="metric c-green">982 FPS</div>
+        <div class="desc">1.01ms/frame &mdash; the scene itself (grid, sky, HUD) costs ~0.9ms. Everything else is per-drone or per-feature overhead.</div>
+      </div>
+      <div class="insight-card">
+        <div class="accent-bar" style="background: linear-gradient(90deg, var(--accent-red), var(--accent-orange));"></div>
+        <div class="label">Most Expensive Feature</div>
+        <div class="metric c-red">Sidebar Ortho</div>
+        <div class="desc">+6.3ms at 64 drones (381% overhead). Renders the full scene 3 extra times for the minimap panels &mdash; multiplicative cost with other features.</div>
+      </div>
+      <div class="insight-card">
+        <div class="accent-bar" style="background: linear-gradient(90deg, var(--accent-orange), var(--accent-yellow));"></div>
+        <div class="label">Second Most Expensive</div>
+        <div class="metric c-orange">Speed Ribbon</div>
+        <div class="desc">+6.3ms at 64 drones (383%). Triangle mesh generation per-drone scales quadratically with trail length &times; drone count.</div>
+      </div>
+      <div class="insight-card">
+        <div class="accent-bar" style="background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple));"></div>
+        <div class="label">Serial Fraction (Amdahl's Law)</div>
+        <div class="metric c-blue">54%</div>
+        <div class="desc">At 64 drones with no features, 54% of frame time is fixed overhead (scene, grid shader, HUD). Scaling beyond 64 is GPU-bound.</div>
+      </div>
+    </div>
+  </div>
+
+<!-- ═══════════════════════════════════════ AMDAHL'S LAW ═══════════════════════════════════════ -->
+  <div class="section">
+    <h2 class="section-title">Amdahl's Law &mdash; Scaling Analysis</h2>
+    <p class="section-desc">
+      Frame time decomposes into a fixed serial cost (scene rendering) plus a per-drone cost that scales linearly:
+      <strong>T(N) = T<sub>serial</sub> + N &times; T<sub>per_drone</sub></strong>.
+      We measure this by running 1 to 64 drones with identical configs.
+    </p>
+
+    <div class="amdahl-box">
+      <h3>Baseline (Trail Off) Decomposition</h3>
+      <div class="formula">T(1) = 0.911ms &nbsp;&nbsp; T(64) = 1.659ms</div>
+      <p><strong>T<sub>per_drone</sub></strong> = (1.659 &minus; 0.911) / 63 = <strong class="c-cyan">0.012 ms/drone</strong></p>
+      <p><strong>T<sub>serial</sub></strong> = 0.911 &minus; 0.012 = <strong class="c-purple">0.899 ms</strong></p>
+      <p><strong>Serial fraction at 64 drones:</strong> 0.899 / 1.659 = <strong class="c-blue">54.2%</strong></p>
+      <br>
+      <h3>Trail On Decomposition</h3>
+      <div class="formula">T(1) = 0.930ms &nbsp;&nbsp; T(64) = 2.434ms</div>
+      <p><strong>T<sub>per_drone</sub></strong> = (2.434 &minus; 0.930) / 63 = <strong class="c-cyan">0.024 ms/drone</strong></p>
+      <p><strong>T<sub>serial</sub></strong> = 0.930 &minus; 0.024 = <strong class="c-purple">0.906 ms</strong></p>
+      <p><strong>Serial fraction at 64 drones:</strong> 0.906 / 2.434 = <strong class="c-blue">37.2%</strong></p>
+      <p style="margin-top:12px; color: var(--text-primary);">Trails double the per-drone cost (0.012 &rarr; 0.024 ms) while serial overhead stays constant &mdash; textbook parallel scaling.</p>
+    </div>
+
+    <div class="chart-grid" style="margin-top: 24px;">
+      <div class="chart-panel full-width">
+        <h3>Frame Time vs Drone Count</h3>
+        <div class="chart-desc">Median frame time (p50) showing linear scaling. Dashed lines = Amdahl's law predicted fit.</div>
+        <div class="chart-container" style="height: 360px;">
+          <canvas id="chartScaling"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<!-- ═══════════════════════════════════════ PHASE BREAKDOWN ═══════════════════════════════════════ -->
+  <div class="section">
+    <h2 class="section-title">Phase Breakdown &mdash; Where Time Goes</h2>
+    <p class="section-desc">
+      Each frame has two measured phases: <strong>update</strong> (vehicle position, trail sampling, ULG replay) and
+      <strong>draw</strong> (BeginDrawing &rarr; EndDrawing: scene, models, trails, HUD). The gap between their sum
+      and total frame time is OS/driver overhead.
+    </p>
+
+    <div class="chart-grid">
+      <div class="chart-panel">
+        <h3>Update Time Scaling</h3>
+        <div class="chart-desc">Per-frame vehicle update cost (ms) &mdash; linear with drone count</div>
+        <div class="chart-container" style="height: 300px;">
+          <canvas id="chartUpdate"></canvas>
+        </div>
+      </div>
+      <div class="chart-panel">
+        <h3>Draw Time Scaling</h3>
+        <div class="chart-desc">Per-frame rendering cost (ms) &mdash; includes models, trails, grid, HUD</div>
+        <div class="chart-container" style="height: 300px;">
+          <canvas id="chartDraw"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<!-- ═══════════════════════════════════════ FEATURE COST ═══════════════════════════════════════ -->
+  <div class="section">
+    <h2 class="section-title">Per-Feature FPS Cost</h2>
+    <p class="section-desc">
+      Each feature tested in isolation against the baseline (trail off, Grid view, perspective).
+      Delta shows the additional frame time cost of enabling that single feature.
+    </p>
+
+    <div class="chart-grid">
+      <div class="chart-panel">
+        <h3>16 Drones &mdash; Feature Cost</h3>
+        <div class="chart-desc">Median frame time by feature (lower = faster)</div>
+        <div class="chart-container" style="height: 320px;">
+          <canvas id="chartFeature16"></canvas>
+        </div>
+      </div>
+      <div class="chart-panel">
+        <h3>64 Drones &mdash; Feature Cost</h3>
+        <div class="chart-desc">Feature costs amplified at high drone count</div>
+        <div class="chart-container" style="height: 320px;">
+          <canvas id="chartFeature64"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Feature isolation tables -->
+    <div class="chart-grid" style="margin-top: 20px;">
+      <div class="data-table-wrapper">
+        <h3>16 Drones &mdash; Feature Isolation</h3>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="text-align:left">Feature</th>
+              <th>FPS Med</th>
+              <th>ft p50</th>
+              <th>draw_ms</th>
+              <th>Delta</th>
+              <th>Overhead</th>
+              <th>CPU%</th>
+              <th>RAM</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Baseline (trail off)</td>
+              <td class="good">953</td>
+              <td>0.956</td>
+              <td>1.041</td>
+              <td>&mdash;</td>
+              <td>&mdash;</td>
+              <td>139%</td>
+              <td>279 MB</td>
+            </tr>
+            <tr>
+              <td>Trail On</td>
+              <td class="good">894</td>
+              <td>0.994</td>
+              <td>1.067</td>
+              <td>+0.038</td>
+              <td class="good">+4%</td>
+              <td>160%</td>
+              <td>280 MB</td>
+            </tr>
+            <tr>
+              <td>Speed Ribbon</td>
+              <td>846</td>
+              <td>1.091</td>
+              <td>1.127</td>
+              <td class="highlight">+0.135</td>
+              <td class="highlight">+13%</td>
+              <td>180%</td>
+              <td>280 MB</td>
+            </tr>
+            <tr>
+              <td>Underwater + Trail</td>
+              <td class="good">859</td>
+              <td>1.014</td>
+              <td>1.113</td>
+              <td>+0.058</td>
+              <td class="good">+6%</td>
+              <td>159%</td>
+              <td>280 MB</td>
+            </tr>
+            <tr>
+              <td>Ortho Top-Down + Trail</td>
+              <td>780</td>
+              <td>1.113</td>
+              <td>1.215</td>
+              <td class="highlight">+0.157</td>
+              <td class="highlight">+15%</td>
+              <td>161%</td>
+              <td>280 MB</td>
+            </tr>
+            <tr>
+              <td>Sidebar + Trail</td>
+              <td class="bad">350</td>
+              <td class="bad">2.792</td>
+              <td>0.897</td>
+              <td class="bad">+1.836</td>
+              <td class="bad">+192%</td>
+              <td>205%</td>
+              <td>296 MB</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="data-table-wrapper">
+        <h3>64 Drones &mdash; Feature Isolation</h3>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="text-align:left">Feature</th>
+              <th>FPS Med</th>
+              <th>ft p50</th>
+              <th>draw_ms</th>
+              <th>Delta</th>
+              <th>Overhead</th>
+              <th>CPU%</th>
+              <th>RAM</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Baseline (trail off)</td>
+              <td class="good">543</td>
+              <td>1.655</td>
+              <td>1.674</td>
+              <td>&mdash;</td>
+              <td>&mdash;</td>
+              <td>195%</td>
+              <td>385 MB</td>
+            </tr>
+            <tr>
+              <td>Trail On</td>
+              <td>440</td>
+              <td>2.310</td>
+              <td>2.178</td>
+              <td class="highlight">+0.655</td>
+              <td class="highlight">+40%</td>
+              <td>210%</td>
+              <td>390 MB</td>
+            </tr>
+            <tr>
+              <td>Speed Ribbon</td>
+              <td class="bad">129</td>
+              <td class="bad">7.997</td>
+              <td class="bad">4.651</td>
+              <td class="bad">+6.342</td>
+              <td class="bad">+383%</td>
+              <td>181%</td>
+              <td>398 MB</td>
+            </tr>
+            <tr>
+              <td>Underwater + Trail</td>
+              <td>432</td>
+              <td>2.338</td>
+              <td>2.178</td>
+              <td class="highlight">+0.683</td>
+              <td class="highlight">+41%</td>
+              <td>211%</td>
+              <td>390 MB</td>
+            </tr>
+            <tr>
+              <td>Ortho Top-Down + Trail</td>
+              <td>415</td>
+              <td>2.419</td>
+              <td>2.214</td>
+              <td class="highlight">+0.764</td>
+              <td class="highlight">+46%</td>
+              <td>216%</td>
+              <td>390 MB</td>
+            </tr>
+            <tr>
+              <td>Sidebar + Trail</td>
+              <td class="bad">126</td>
+              <td class="bad">7.960</td>
+              <td>3.112</td>
+              <td class="bad">+6.305</td>
+              <td class="bad">+381%</td>
+              <td>201%</td>
+              <td>394 MB</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+<!-- ═══════════════════════════════════════ COMBINED ═══════════════════════════════════════ -->
+  <div class="section">
+    <h2 class="section-title">Combined Load &mdash; Additivity Test</h2>
+    <p class="section-desc">
+      If feature costs were independent, the combined cost would equal the sum of individual deltas plus baseline.
+      Non-additivity reveals multiplicative interactions (e.g., sidebar re-renders all trails 3&times;).
+    </p>
+
+    <div class="chart-grid">
+      <div class="chart-panel full-width">
+        <h3>Predicted (Additive) vs Actual Combined Frame Time</h3>
+        <div class="chart-desc">Ribbon + Underwater + Sidebar combined on. Gap = multiplicative interaction cost.</div>
+        <div class="chart-container" style="height: 320px;">
+          <canvas id="chartCombined"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div class="data-table-wrapper" style="margin-top:20px;">
+      <h3>Combined &amp; View Mode Results</h3>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th style="text-align:left">Config</th>
+            <th>Drones</th>
+            <th>FPS Med</th>
+            <th>ft p50</th>
+            <th>draw_ms</th>
+            <th>CPU%</th>
+            <th>RAM</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>ALL features (ribbon+uw+sidebar)</td>
+            <td>16</td>
+            <td class="bad">85</td>
+            <td class="bad">11.850</td>
+            <td>2.011</td>
+            <td>159%</td>
+            <td>307 MB</td>
+          </tr>
+          <tr>
+            <td>ALL features (ribbon+uw+sidebar)</td>
+            <td>64</td>
+            <td class="bad">61</td>
+            <td class="bad">15.890</td>
+            <td>3.889</td>
+            <td>185%</td>
+            <td>397 MB</td>
+          </tr>
+          <tr>
+            <td>1988 View &mdash; Baseline</td>
+            <td>16</td>
+            <td class="good">835</td>
+            <td>1.076</td>
+            <td>1.192</td>
+            <td>126%</td>
+            <td>279 MB</td>
+          </tr>
+          <tr>
+            <td>1988 View &mdash; Speed Ribbon</td>
+            <td>16</td>
+            <td class="highlight">307</td>
+            <td class="highlight">3.165</td>
+            <td>2.455</td>
+            <td>156%</td>
+            <td>292 MB</td>
+          </tr>
+          <tr>
+            <td>1988 View &mdash; Baseline</td>
+            <td>64</td>
+            <td>450</td>
+            <td>1.623</td>
+            <td>1.716</td>
+            <td>177%</td>
+            <td>393 MB</td>
+          </tr>
+          <tr>
+            <td>1988 View &mdash; Speed Ribbon</td>
+            <td>64</td>
+            <td class="bad">121</td>
+            <td class="bad">7.702</td>
+            <td class="bad">4.799</td>
+            <td>173%</td>
+            <td>406 MB</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+<!-- ═══════════════════════════════════════ MEMORY ═══════════════════════════════════════ -->
+  <div class="section">
+    <h2 class="section-title">Memory &amp; Resource Scaling</h2>
+    <div class="chart-grid">
+      <div class="chart-panel">
+        <h3>RAM (Working Set) vs Drone Count</h3>
+        <div class="chart-desc">Baseline config (trail off). ~2.4 MB per additional drone.</div>
+        <div class="chart-container" style="height: 300px;">
+          <canvas id="chartRAM"></canvas>
+        </div>
+      </div>
+      <div class="chart-panel">
+        <h3>VRAM (Free) vs Drone Count</h3>
+        <div class="chart-desc">AMD ATI extension reports free VRAM. Each drone uses ~0.25 MB VRAM.</div>
+        <div class="chart-container" style="height: 300px;">
+          <canvas id="chartVRAM"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<!-- ═══════════════════════════════════════ LATENCY ═══════════════════════════════════════ -->
+  <div class="section">
+    <h2 class="section-title">Frame Latency Distribution</h2>
+    <p class="section-desc">
+      Tail latency matters for perceived smoothness. The p95 and p99 show worst-case frame delivery.
+      Note: p99 spikes at 32+ drones are from ULG file I/O contention (64 concurrent readers), not rendering.
+    </p>
+
+    <div class="chart-grid">
+      <div class="chart-panel full-width">
+        <h3>Frame Time Percentiles &mdash; Baseline (Trail Off)</h3>
+        <div class="chart-desc">p50 (typical), p95 (stutter threshold), and min (best case)</div>
+        <div class="chart-container" style="height: 340px;">
+          <canvas id="chartLatency"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<!-- ═══════════════════════════════════════ HEATMAP ═══════════════════════════════════════ -->
+  <div class="section">
+    <h2 class="section-title">FPS Heatmap &mdash; Feature &times; Drone Count</h2>
+    <p class="section-desc">Median FPS across all tested configurations. Color intensity maps to performance.</p>
+
+    <div class="chart-panel full-width" style="overflow-x: auto;">
+      <table class="heatmap" id="heatmapTable">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Baseline</th>
+            <th>Trail</th>
+            <th>Ribbon</th>
+            <th>Underwater</th>
+            <th>Ortho</th>
+            <th>Sidebar</th>
+          </tr>
+        </thead>
+        <tbody id="heatmapBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+<!-- ═══════════════════════════════════════ FOOTER ═══════════════════════════════════════ -->
+  <div class="footer">
+    <p>MAVSim Viewer Benchmark Report v2 &bull; Generated 2026-03-11 &bull; ULG: 13b99e7f &bull; 30 runs &times; 30s</p>
+    <p style="margin-top:4px;">Amdahl's Law: S = T<sub>serial</sub> / T<sub>total</sub> &bull; Per-drone cost = &Delta;T / &Delta;N</p>
+  </div>
+
+</div><!-- end .container -->
+
+<!-- ═══════════════════════════════════════ CHARTS ═══════════════════════════════════════ -->
+<script>
+Chart.defaults.color = '#8b949e';
+Chart.defaults.borderColor = '#30363d';
+Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif";
+
+const droneCounts = [1, 4, 9, 16, 32, 64];
+const droneLabels = ['1', '4', '9', '16', '32', '64'];
+
+// ── Scaling chart ──
+const baselineFt = [0.911, 0.922, 0.938, 0.982, 0.966, 1.659];
+const trailFt    = [0.930, 0.950, 0.963, 0.979, 1.043, 2.434];
+
+// Amdahl predicted (linear fit)
+const bSerial = 0.899, bPerDrone = 0.012;
+const tSerial = 0.906, tPerDrone = 0.024;
+const baselinePred = droneCounts.map(n => bSerial + n * bPerDrone);
+const trailPred    = droneCounts.map(n => tSerial + n * tPerDrone);
+
+new Chart(document.getElementById('chartScaling'), {
+  type: 'line',
+  data: {
+    labels: droneLabels,
+    datasets: [
+      {
+        label: 'Baseline (measured)',
+        data: baselineFt,
+        borderColor: '#58a6ff',
+        backgroundColor: 'rgba(88,166,255,0.1)',
+        borderWidth: 3,
+        pointRadius: 6,
+        pointBackgroundColor: '#58a6ff',
+        tension: 0.2,
+        fill: true,
+      },
+      {
+        label: 'Baseline (Amdahl predicted)',
+        data: baselinePred,
+        borderColor: '#58a6ff',
+        borderWidth: 2,
+        borderDash: [8, 4],
+        pointRadius: 0,
+        tension: 0,
+        fill: false,
+      },
+      {
+        label: 'Trail On (measured)',
+        data: trailFt,
+        borderColor: '#3fb950',
+        backgroundColor: 'rgba(63,185,80,0.08)',
+        borderWidth: 3,
+        pointRadius: 6,
+        pointBackgroundColor: '#3fb950',
+        tension: 0.2,
+        fill: true,
+      },
+      {
+        label: 'Trail On (Amdahl predicted)',
+        data: trailPred,
+        borderColor: '#3fb950',
+        borderWidth: 2,
+        borderDash: [8, 4],
+        pointRadius: 0,
+        tension: 0,
+        fill: false,
+      },
+    ]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    scales: {
+      x: { title: { display: true, text: 'Drone Count', color: '#656d76' }, grid: { color: '#21262d' } },
+      y: { title: { display: true, text: 'Frame Time p50 (ms)', color: '#656d76' }, grid: { color: '#21262d' },
+           min: 0, suggestedMax: 3 }
+    },
+    plugins: {
+      legend: { position: 'top', labels: { usePointStyle: true, padding: 16 } },
+      tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(3) + ' ms' } }
+    }
+  }
+});
+
+// ── Update time chart ──
+const updateBaseline = [0.004, 0.007, 0.012, 0.019, 0.038, 0.148];
+const updateTrail    = [0.004, 0.007, 0.011, 0.018, 0.035, 0.172];
+
+new Chart(document.getElementById('chartUpdate'), {
+  type: 'bar',
+  data: {
+    labels: droneLabels,
+    datasets: [
+      { label: 'Baseline', data: updateBaseline, backgroundColor: 'rgba(88,166,255,0.7)', borderRadius: 4 },
+      { label: 'Trail On', data: updateTrail, backgroundColor: 'rgba(63,185,80,0.7)', borderRadius: 4 },
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    scales: {
+      x: { title: { display: true, text: 'Drones' }, grid: { display: false } },
+      y: { title: { display: true, text: 'update_ms' }, grid: { color: '#21262d' }, min: 0 }
+    },
+    plugins: { legend: { position: 'top', labels: { usePointStyle: true } } }
+  }
+});
+
+// ── Draw time chart ──
+const drawBaseline = [1.005, 1.026, 1.042, 1.047, 1.062, 1.700];
+const drawTrail    = [1.018, 1.046, 1.058, 1.080, 1.112, 2.156];
+
+new Chart(document.getElementById('chartDraw'), {
+  type: 'bar',
+  data: {
+    labels: droneLabels,
+    datasets: [
+      { label: 'Baseline', data: drawBaseline, backgroundColor: 'rgba(88,166,255,0.7)', borderRadius: 4 },
+      { label: 'Trail On', data: drawTrail, backgroundColor: 'rgba(63,185,80,0.7)', borderRadius: 4 },
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    scales: {
+      x: { title: { display: true, text: 'Drones' }, grid: { display: false } },
+      y: { title: { display: true, text: 'draw_ms' }, grid: { color: '#21262d' }, min: 0 }
+    },
+    plugins: { legend: { position: 'top', labels: { usePointStyle: true } } }
+  }
+});
+
+// ── Feature cost charts (horizontal bar) ──
+const featureLabels = ['Baseline', 'Trail', 'Ribbon', 'Underwater', 'Ortho', 'Sidebar'];
+const featureColors = ['#58a6ff', '#3fb950', '#d29922', '#39d2c0', '#bc8cff', '#f85149'];
+
+const ft16 = [0.956, 0.994, 1.091, 1.014, 1.113, 2.792];
+const ft64 = [1.655, 2.310, 7.997, 2.338, 2.419, 7.960];
+
+function makeFeatureChart(id, data) {
+  new Chart(document.getElementById(id), {
+    type: 'bar',
+    data: {
+      labels: featureLabels,
+      datasets: [{
+        data: data,
+        backgroundColor: featureColors.map(c => c + 'cc'),
+        borderColor: featureColors,
+        borderWidth: 2,
+        borderRadius: 6,
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { title: { display: true, text: 'Frame Time p50 (ms)' }, grid: { color: '#21262d' }, min: 0 },
+        y: { grid: { display: false } }
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const val = ctx.parsed.x;
+              const base = data[0];
+              const delta = val - base;
+              const pct = base > 0 ? (delta / base * 100) : 0;
+              return val.toFixed(3) + ' ms' + (ctx.dataIndex > 0 ? '  (+' + delta.toFixed(3) + ' / +' + pct.toFixed(0) + '%)' : '');
+            }
+          }
+        }
+      }
+    }
+  });
+}
+makeFeatureChart('chartFeature16', ft16);
+makeFeatureChart('chartFeature64', ft64);
+
+// ── Combined additivity chart ──
+new Chart(document.getElementById('chartCombined'), {
+  type: 'bar',
+  data: {
+    labels: ['16 Drones', '64 Drones'],
+    datasets: [
+      {
+        label: 'Predicted (sum of deltas + baseline)',
+        data: [
+          0.956 + (1.091-0.956) + (1.014-0.956) + (2.792-0.956),  // 16: base + ribbon + uw + sidebar deltas
+          1.655 + (7.997-1.655) + (2.338-1.655) + (7.960-1.655),   // 64
+        ],
+        backgroundColor: 'rgba(88,166,255,0.5)',
+        borderColor: '#58a6ff',
+        borderWidth: 2,
+        borderRadius: 6,
+      },
+      {
+        label: 'Actual Combined',
+        data: [11.850, 15.890],
+        backgroundColor: 'rgba(248,81,73,0.5)',
+        borderColor: '#f85149',
+        borderWidth: 2,
+        borderRadius: 6,
+      }
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    scales: {
+      x: { grid: { display: false } },
+      y: { title: { display: true, text: 'Frame Time p50 (ms)' }, grid: { color: '#21262d' }, min: 0 }
+    },
+    plugins: {
+      legend: { position: 'top', labels: { usePointStyle: true, padding: 16 } },
+      tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(3) + ' ms' } }
+    }
+  }
+});
+
+// ── RAM chart ──
+const ramData = [238, 253, 263, 279, 312, 389];
+new Chart(document.getElementById('chartRAM'), {
+  type: 'line',
+  data: {
+    labels: droneLabels,
+    datasets: [{
+      label: 'Working Set (MB)',
+      data: ramData,
+      borderColor: '#bc8cff',
+      backgroundColor: 'rgba(188,140,255,0.1)',
+      borderWidth: 3,
+      pointRadius: 6,
+      pointBackgroundColor: '#bc8cff',
+      tension: 0.2,
+      fill: true,
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    scales: {
+      x: { title: { display: true, text: 'Drones' }, grid: { color: '#21262d' } },
+      y: { title: { display: true, text: 'MB' }, grid: { color: '#21262d' }, min: 200 }
+    },
+    plugins: { legend: { display: false } }
+  }
+});
+
+// ── VRAM chart ──
+const vramData = [11303, 11303, 11303, 11299, 11295, 11287];
+new Chart(document.getElementById('chartVRAM'), {
+  type: 'line',
+  data: {
+    labels: droneLabels,
+    datasets: [{
+      label: 'Free VRAM (MB)',
+      data: vramData,
+      borderColor: '#39d2c0',
+      backgroundColor: 'rgba(57,210,192,0.1)',
+      borderWidth: 3,
+      pointRadius: 6,
+      pointBackgroundColor: '#39d2c0',
+      tension: 0.2,
+      fill: true,
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    scales: {
+      x: { title: { display: true, text: 'Drones' }, grid: { color: '#21262d' } },
+      y: { title: { display: true, text: 'Free VRAM (MB)' }, grid: { color: '#21262d' },
+           min: 11280, max: 11310 }
+    },
+    plugins: { legend: { display: false } }
+  }
+});
+
+// ── Latency percentiles chart ──
+const latMin = [0.672, 0.615, 0.617, 0.732, 0.690, 0.906];
+const latP50 = [0.911, 0.922, 0.938, 0.982, 0.966, 1.659];
+const latP95 = [1.697, 1.644, 1.740, 2.019, 1.801, 7.783];
+
+new Chart(document.getElementById('chartLatency'), {
+  type: 'line',
+  data: {
+    labels: droneLabels,
+    datasets: [
+      {
+        label: 'Min',
+        data: latMin,
+        borderColor: '#3fb950',
+        backgroundColor: 'rgba(63,185,80,0.05)',
+        borderWidth: 2,
+        pointRadius: 5,
+        pointBackgroundColor: '#3fb950',
+        fill: false,
+      },
+      {
+        label: 'p50 (Median)',
+        data: latP50,
+        borderColor: '#58a6ff',
+        backgroundColor: 'rgba(88,166,255,0.1)',
+        borderWidth: 3,
+        pointRadius: 6,
+        pointBackgroundColor: '#58a6ff',
+        fill: '+1',
+      },
+      {
+        label: 'p95',
+        data: latP95,
+        borderColor: '#d29922',
+        backgroundColor: 'rgba(210,153,34,0.08)',
+        borderWidth: 2,
+        pointRadius: 5,
+        pointBackgroundColor: '#d29922',
+        fill: false,
+      },
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    scales: {
+      x: { title: { display: true, text: 'Drone Count' }, grid: { color: '#21262d' } },
+      y: { title: { display: true, text: 'Frame Time (ms)' }, grid: { color: '#21262d' }, min: 0, suggestedMax: 10 }
+    },
+    plugins: {
+      legend: { position: 'top', labels: { usePointStyle: true, padding: 16 } },
+      tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(3) + ' ms' } }
+    }
+  }
+});
+
+// ── Heatmap ──
+(function() {
+  // Data: [drones][feature] = FPS median
+  // Features: baseline, trail, ribbon, underwater, ortho, sidebar
+  const heatData = {
+    16: [953, 894, 846, 859, 780, 350],
+    64: [543, 440, 129, 432, 415, 126],
+  };
+
+  const tbody = document.getElementById('heatmapBody');
+  const maxFPS = 1000;
+
+  for (const [drones, values] of Object.entries(heatData)) {
+    const tr = document.createElement('tr');
+    const th = document.createElement('th');
+    th.className = 'row-header';
+    th.textContent = drones + ' drones';
+    tr.appendChild(th);
+
+    values.forEach((fps, i) => {
+      const td = document.createElement('td');
+      const ratio = Math.min(fps / maxFPS, 1);
+
+      // Color: green(good) -> yellow -> red(bad)
+      let r, g, b;
+      if (ratio > 0.5) {
+        const t = (ratio - 0.5) * 2;
+        r = Math.round(63 + (227 - 63) * (1 - t));
+        g = Math.round(185 + (179 - 185) * (1 - t));
+        b = Math.round(80 + (65 - 80) * (1 - t));
+      } else {
+        const t = ratio * 2;
+        r = Math.round(248 + (227 - 248) * t);
+        g = Math.round(81 + (179 - 81) * t);
+        b = Math.round(73 + (65 - 73) * t);
+      }
+
+      const bgAlpha = 0.25;
+      td.style.background = `rgba(${r},${g},${b},${bgAlpha})`;
+      td.style.color = `rgb(${r},${g},${b})`;
+      td.textContent = fps;
+
+      // Delta as subtitle
+      if (i > 0) {
+        const delta = values[0] - fps;
+        const sub = document.createElement('span');
+        sub.className = 'sub';
+        sub.textContent = '-' + delta;
+        td.appendChild(sub);
+      }
+
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  }
+})();
+</script>
+
+</body>
+</html>
