@@ -1683,6 +1683,7 @@ int main(int argc, char *argv[]) {
 
                     if (shift) {
                         scene.cam_mode = CAM_MODE_FREE;
+                        scene.free_track = true;
                         scene.camera.position = seek_pos;
                         scene.camera.target = vehicles[0].position;
                     } else {

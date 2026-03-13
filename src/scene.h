@@ -69,6 +69,7 @@ typedef struct {
     ortho_mode_t ortho_mode; // fullscreen ortho view (0 = perspective)
     float ortho_span;        // ortho view span in world units
     // Underwater mode
+    bool free_track;         // free cam tracks vehicle until WASDQE detaches
     bool is_underwater;      // U key toggle (eventually auto from MAV_TYPE_SUBMARINE)
     int loc_isUnderwater;    // grid shader uniform
     int loc_time;            // grid shader uniform (caustic animation)

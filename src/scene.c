@@ -651,30 +651,58 @@ void scene_update_camera(scene_t *s, Vector3 vehicle_pos, Quaternion vehicle_rot
             float dt = GetFrameTime();
             float speed = 20.0f * dt;
 
-            // Forward direction (horizontal)
-            Vector3 forward = Vector3Normalize(Vector3Subtract(s->camera.target, s->camera.position));
-            Vector3 right = Vector3Normalize(Vector3CrossProduct(forward, s->camera.up));
+            // WASDQE breaks tracking
+            bool move = IsKeyDown(KEY_W) || IsKeyDown(KEY_S) || IsKeyDown(KEY_A) ||
+                        IsKeyDown(KEY_D) || IsKeyDown(KEY_Q) || IsKeyDown(KEY_E);
+            if (move) s->free_track = false;
 
-            // WASD movement
-            if (IsKeyDown(KEY_W)) { s->camera.position = Vector3Add(s->camera.position, Vector3Scale(forward, speed)); s->camera.target = Vector3Add(s->camera.target, Vector3Scale(forward, speed)); }
-            if (IsKeyDown(KEY_S)) { s->camera.position = Vector3Add(s->camera.position, Vector3Scale(forward, -speed)); s->camera.target = Vector3Add(s->camera.target, Vector3Scale(forward, -speed)); }
-            if (IsKeyDown(KEY_D)) { s->camera.position = Vector3Add(s->camera.position, Vector3Scale(right, speed)); s->camera.target = Vector3Add(s->camera.target, Vector3Scale(right, speed)); }
-            if (IsKeyDown(KEY_A)) { s->camera.position = Vector3Add(s->camera.position, Vector3Scale(right, -speed)); s->camera.target = Vector3Add(s->camera.target, Vector3Scale(right, -speed)); }
-            if (IsKeyDown(KEY_E)) { s->camera.position.y += speed; s->camera.target.y += speed; }
-            if (IsKeyDown(KEY_Q)) { s->camera.position.y -= speed; s->camera.target.y -= speed; }
+            if (s->free_track) {
+                // Track mode: camera looks at vehicle, scroll zooms in/out
+                s->camera.target = vehicle_pos;
+                float wheel = GetMouseWheelMove();
+                if (wheel != 0.0f) {
+                    Vector3 dir = Vector3Subtract(s->camera.position, vehicle_pos);
+                    float dist = Vector3Length(dir);
+                    dist -= wheel * 2.0f;
+                    if (dist < 2.0f) dist = 2.0f;
+                    s->camera.position = Vector3Add(vehicle_pos, Vector3Scale(Vector3Normalize(dir), dist));
+                }
+                // Mouse look: orbit around vehicle
+                if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) || IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
+                    Vector2 delta = GetMouseDelta();
+                    float sensitivity = 0.003f;
+                    Vector3 offset = Vector3Subtract(s->camera.position, vehicle_pos);
+                    Vector3 right = Vector3Normalize(Vector3CrossProduct(
+                        Vector3Normalize(Vector3Subtract(vehicle_pos, s->camera.position)), s->camera.up));
+                    Matrix yaw_m = MatrixRotate((Vector3){0,1,0}, -delta.x * sensitivity);
+                    Matrix pitch_m = MatrixRotate(right, -delta.y * sensitivity);
+                    offset = Vector3Transform(offset, yaw_m);
+                    offset = Vector3Transform(offset, pitch_m);
+                    s->camera.position = Vector3Add(vehicle_pos, offset);
+                }
+            } else {
+                // Free-fly mode
+                Vector3 forward = Vector3Normalize(Vector3Subtract(s->camera.target, s->camera.position));
+                Vector3 right = Vector3Normalize(Vector3CrossProduct(forward, s->camera.up));
 
-            // Mouse look (any click held)
-            if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) || IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
-                Vector2 delta = GetMouseDelta();
-                float sensitivity = 0.003f;
-                // Yaw (rotate around world up)
-                Matrix yaw = MatrixRotate((Vector3){0,1,0}, -delta.x * sensitivity);
-                // Pitch (rotate around camera right)
-                Matrix pitch = MatrixRotate(right, -delta.y * sensitivity);
-                Vector3 dir = Vector3Subtract(s->camera.target, s->camera.position);
-                dir = Vector3Transform(dir, yaw);
-                dir = Vector3Transform(dir, pitch);
-                s->camera.target = Vector3Add(s->camera.position, dir);
+                if (IsKeyDown(KEY_W)) { s->camera.position = Vector3Add(s->camera.position, Vector3Scale(forward, speed)); s->camera.target = Vector3Add(s->camera.target, Vector3Scale(forward, speed)); }
+                if (IsKeyDown(KEY_S)) { s->camera.position = Vector3Add(s->camera.position, Vector3Scale(forward, -speed)); s->camera.target = Vector3Add(s->camera.target, Vector3Scale(forward, -speed)); }
+                if (IsKeyDown(KEY_D)) { s->camera.position = Vector3Add(s->camera.position, Vector3Scale(right, speed)); s->camera.target = Vector3Add(s->camera.target, Vector3Scale(right, speed)); }
+                if (IsKeyDown(KEY_A)) { s->camera.position = Vector3Add(s->camera.position, Vector3Scale(right, -speed)); s->camera.target = Vector3Add(s->camera.target, Vector3Scale(right, -speed)); }
+                if (IsKeyDown(KEY_E)) { s->camera.position.y += speed; s->camera.target.y += speed; }
+                if (IsKeyDown(KEY_Q)) { s->camera.position.y -= speed; s->camera.target.y -= speed; }
+
+                // Mouse look (any click held)
+                if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) || IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
+                    Vector2 delta = GetMouseDelta();
+                    float sensitivity = 0.003f;
+                    Matrix yaw = MatrixRotate((Vector3){0,1,0}, -delta.x * sensitivity);
+                    Matrix pitch = MatrixRotate(right, -delta.y * sensitivity);
+                    Vector3 dir = Vector3Subtract(s->camera.target, s->camera.position);
+                    dir = Vector3Transform(dir, yaw);
+                    dir = Vector3Transform(dir, pitch);
+                    s->camera.target = Vector3Add(s->camera.position, dir);
+                }
             }
             break;
         }
@@ -707,6 +735,7 @@ void scene_handle_input(scene_t *s) {
 
     if (IsKeyPressed(KEY_C)) {
         s->ortho_mode = ORTHO_NONE;  // return to perspective on camera toggle
+        s->free_track = false;
         s->cam_mode = (s->cam_mode + 1) % CAM_MODE_COUNT;
         const char *names[] = {"Chase", "FPV", "Free"};
         printf("Camera: %s\n", names[s->cam_mode]);
