@@ -164,14 +164,22 @@ int main(int argc, char *argv[]) {
         vehicles[i].color = vehicle_colors[i];
     }
 
-    // TASK 3: Spatial conflict detection + resolution (multi-file replay only)
+    // Position resolution for all vehicles (hoisted for use by HUD state population)
+    position_resolution_t resolve[MAX_VEHICLES];
+    for (int i = 0; i < MAX_VEHICLES; i++) {
+        resolve[i] = (position_resolution_t){ .tier = 1, .confidence = 1.0f, .estimated = false };
+    }
+
+    // Spatial conflict detection + resolution (multi-file replay only)
     if (is_replay && num_replay_files > 1) {
         // Determine position resolution tier for each drone
-        position_resolution_t resolve[MAX_VEHICLES];
         for (int i = 0; i < num_replay_files; i++) {
             ulog_replay_ctx_t *r = (ulog_replay_ctx_t *)sources[i].impl;
-            if (r->home.valid) {
-                // TODO: After merge with agent 1A, refine: if home_from_topic → tier 1, conf 1.0
+            if (r->home_from_topic) {
+                resolve[i].tier = 1;
+                resolve[i].confidence = 1.0f;
+                resolve[i].estimated = false;
+            } else if (r->home.valid) {
                 resolve[i].tier = 2;
                 resolve[i].confidence = 0.85f;
                 resolve[i].estimated = false;
@@ -371,6 +379,63 @@ int main(int argc, char *argv[]) {
             vehicles[i].origin_set = true;
         }
         printf("NED origin: lat=%.6f lon=%.6f alt=%.1f\n", origin_lat, origin_lon, origin_alt);
+    }
+
+    // ── Temporal alignment (Task 2) ──
+    if (num_replay_files > 1) {
+        ulog_replay_ctx_t *ref = (ulog_replay_ctx_t *)sources[0].impl;
+        uint64_t ref_anchor = ref->takeoff_anchor.anchor_usec;
+
+        for (int i = 0; i < num_replay_files; i++) {
+            ulog_replay_ctx_t *r = (ulog_replay_ctx_t *)sources[i].impl;
+            if (r->takeoff_anchor.method > 0 && ref_anchor > 0) {
+                r->time_offset = (int64_t)ref_anchor
+                               - (int64_t)r->takeoff_anchor.anchor_usec;
+            } else {
+                r->time_offset = 0;
+            }
+        }
+
+        printf("Temporal alignment:\n");
+        for (int i = 0; i < num_replay_files; i++) {
+            ulog_replay_ctx_t *r = (ulog_replay_ctx_t *)sources[i].impl;
+            printf("  Replay %d: takeoff=%.3fs offset=%+.3fs conf=%.2f\n",
+                   i, r->takeoff_anchor.anchor_usec / 1e6,
+                   r->time_offset / 1e6, r->takeoff_anchor.confidence);
+        }
+    }
+
+    // ── Populate per-vehicle HUD state (Task 3) ──
+    if (is_replay) {
+        for (int i = 0; i < num_replay_files; i++) {
+            ulog_replay_ctx_t *r = (ulog_replay_ctx_t *)sources[i].impl;
+            vehicles[i].pos_tier = resolve[i].tier;
+            vehicles[i].pos_confidence = resolve[i].confidence;
+            vehicles[i].pos_estimated = resolve[i].estimated;
+            vehicles[i].temporal_confidence = r->takeoff_anchor.confidence;
+        }
+    }
+
+    // ── Ghost alpha (Task 4) ──
+    if (ghost_mode && num_replay_files > 1) {
+        vehicle_set_ghost_alpha(&vehicles[0], 1.0f);
+        for (int i = 1; i < num_replay_files; i++)
+            vehicle_set_ghost_alpha(&vehicles[i], 0.35f);
+    }
+
+    // ── Unified timeline duration (Task 5) ──
+    float unified_duration = 0;
+    if (is_replay) {
+        for (int i = 0; i < num_replay_files; i++) {
+            ulog_replay_ctx_t *r = (ulog_replay_ctx_t *)sources[i].impl;
+            float dur = ulog_replay_aligned_duration(r);
+            if (dur > unified_duration) unified_duration = dur;
+        }
+        if (num_replay_files > 1 && unified_duration > 0) {
+            for (int i = 0; i < num_replay_files; i++) {
+                sources[i].playback.duration_s = unified_duration;
+            }
+        }
     }
 
     hud_t hud;
@@ -611,7 +676,10 @@ int main(int argc, char *argv[]) {
             if (IsKeyPressed(KEY_R)) {
                 for (int i = 0; i < num_replay_files; i++) {
                     ulog_replay_ctx_t *ctx = (ulog_replay_ctx_t *)sources[i].impl;
-                    ulog_replay_seek(ctx, 0.0f);
+                    float offset_s = (float)(ctx->time_offset / 1e6);
+                    float adjusted = offset_s;  // unified time 0 + per-source offset
+                    if (adjusted < 0.0f) adjusted = 0.0f;
+                    ulog_replay_seek(ctx, adjusted);
                     sources[i].connected = true;
                     sources[i].playback.paused = false;
                     vehicle_reset_trail(&vehicles[i]);
@@ -621,20 +689,27 @@ int main(int argc, char *argv[]) {
             }
             if (IsKeyPressed(KEY_RIGHT)) {
                 float step = (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) ? 30.0f : 5.0f;
+                float seek_target = sources[selected].playback.position_s + step;
                 for (int i = 0; i < num_replay_files; i++) {
                     ulog_replay_ctx_t *ctx = (ulog_replay_ctx_t *)sources[i].impl;
-                    ulog_replay_seek(ctx, sources[i].playback.position_s + step);
+                    float offset_s = (float)(ctx->time_offset / 1e6);
+                    float adjusted = seek_target + offset_s;
+                    if (adjusted < 0.0f) adjusted = 0.0f;
+                    ulog_replay_seek(ctx, adjusted);
                     sources[i].playback.position_s = (float)ctx->wall_accum;
                     vehicle_reset_trail(&vehicles[i]);
                 }
             }
             if (IsKeyPressed(KEY_LEFT)) {
                 float step = (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) ? 30.0f : 5.0f;
+                float seek_target = sources[selected].playback.position_s - step;
+                if (seek_target < 0.0f) seek_target = 0.0f;
                 for (int i = 0; i < num_replay_files; i++) {
                     ulog_replay_ctx_t *ctx = (ulog_replay_ctx_t *)sources[i].impl;
-                    float target = sources[i].playback.position_s - step;
-                    if (target < 0.0f) target = 0.0f;
-                    ulog_replay_seek(ctx, target);
+                    float offset_s = (float)(ctx->time_offset / 1e6);
+                    float adjusted = seek_target + offset_s;
+                    if (adjusted < 0.0f) adjusted = 0.0f;
+                    ulog_replay_seek(ctx, adjusted);
                     sources[i].playback.position_s = (float)ctx->wall_accum;
                     vehicle_reset_trail(&vehicles[i]);
                     vehicles[i].origin_set = false;
