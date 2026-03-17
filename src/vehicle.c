@@ -285,8 +285,13 @@ void vehicle_init(vehicle_t *v, int model_idx, Shader lighting_shader) {
 
     v->lighting_shader = lighting_shader;
     v->loc_matNormal = -1;
+    v->ghost_alpha = 1.0f;
+    v->loc_ghost_alpha = -1;
     if (lighting_shader.id > 0) {
         v->loc_matNormal = GetShaderLocation(lighting_shader, "matNormal");
+        v->loc_ghost_alpha = GetShaderLocation(lighting_shader, "ghostAlpha");
+        float one = 1.0f;
+        SetShaderValue(lighting_shader, v->loc_ghost_alpha, &one, SHADER_UNIFORM_FLOAT);
     }
 
     vehicle_load_model(v, model_idx);
@@ -535,7 +540,14 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
         SetShaderValueMatrix(v->lighting_shader, v->loc_matNormal, rot_only);
     }
 
+    // Set ghost alpha on shader before drawing
+    if (v->loc_ghost_alpha >= 0) {
+        SetShaderValue(v->lighting_shader, v->loc_ghost_alpha, &v->ghost_alpha, SHADER_UNIFORM_FLOAT);
+    }
+
+    if (v->ghost_alpha < 1.0f) rlDisableDepthMask();
     DrawModel(v->model, (Vector3){0}, 1.0f, WHITE);
+    if (v->ghost_alpha < 1.0f) rlEnableDepthMask();
 
     // Draw path trail (mode 1) or speed ribbon (mode 2)
     if (trail_mode > 0 && v->trail_count > 1) {
@@ -631,7 +643,7 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
             unsigned char ccr = (unsigned char)(cr > 255 ? 255 : cr);
             unsigned char ccg = (unsigned char)(cg > 255 ? 255 : cg);
             unsigned char ccb = (unsigned char)(cb > 255 ? 255 : cb);
-            unsigned char ca  = (unsigned char)(t * trail_color.a);
+            unsigned char ca  = (unsigned char)(t * trail_color.a * v->ghost_alpha);
             rlColor4ub(ccr, ccg, ccb, ca);
             if (!thick) {
                 rlVertex3f(v->trail[idx0].x, v->trail[idx0].y, v->trail[idx0].z);
@@ -735,6 +747,7 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
 
             float t = (float)i / (float)v->trail_count;
             Color c = heat_to_color(heat, (unsigned char)(t * 200), view_mode);
+            c.a = (unsigned char)(c.a * v->ghost_alpha);
 
             Vector3 a = { p0.x + perp.x*hw0, p0.y + perp.y*hw0, p0.z + perp.z*hw0 };
             Vector3 b = { p0.x - perp.x*hw0, p0.y - perp.y*hw0, p0.z - perp.z*hw0 };
@@ -824,6 +837,10 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
         if (v->green_material_idx >= 0)
             v->model.materials[v->green_material_idx].maps[MATERIAL_MAP_DIFFUSE].color = saved_green;
     }
+}
+
+void vehicle_set_ghost_alpha(vehicle_t *v, float alpha) {
+    v->ghost_alpha = alpha;
 }
 
 void vehicle_reset_trail(vehicle_t *v) {

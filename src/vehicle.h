@@ -80,6 +80,8 @@ typedef struct {
     Vector3 trail_last_dir;  // direction of last recorded segment (for adaptive sampling)
     Shader lighting_shader;  // shared lighting shader (id=0 if none)
     int loc_matNormal;       // shader uniform for normal matrix
+    float ghost_alpha;       // 1.0 = fully opaque (default), 0.35 = ghost
+    int   loc_ghost_alpha;   // shader uniform location for ghostAlpha
 } vehicle_t;
 
 // Initialize vehicle state and load the model at model_idx. shader is optional lighting shader (id=0 to skip).
@@ -106,6 +108,9 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
 
 // Reset the path trail.
 void vehicle_reset_trail(vehicle_t *v);
+
+// Set ghost alpha (1.0 = opaque, 0.35 = ghost).
+void vehicle_set_ghost_alpha(vehicle_t *v, float alpha);
 
 // Unload model resources.
 void vehicle_cleanup(vehicle_t *v);
