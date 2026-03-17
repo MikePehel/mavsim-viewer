@@ -305,6 +305,11 @@ void scene_init(scene_t *s) {
     SetShaderValue(s->lighting_shader, s->loc_lightDir, &sun, SHADER_UNIFORM_VEC3);
     float ambient = 0.35f;
     SetShaderValue(s->lighting_shader, s->loc_ambient, &ambient, SHADER_UNIFORM_FLOAT);
+
+    // Default ghostAlpha to 1.0 — vehicle draw overrides per-vehicle
+    int loc_ghost = GetShaderLocation(s->lighting_shader, "ghostAlpha");
+    float ghost_default = 1.0f;
+    SetShaderValue(s->lighting_shader, loc_ghost, &ghost_default, SHADER_UNIFORM_FLOAT);
 }
 
 static void update_chase_camera(scene_t *s, Vector3 pos) {

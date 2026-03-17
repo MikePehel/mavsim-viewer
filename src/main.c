@@ -6,6 +6,10 @@
 #endif
 #include <math.h>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 #include "raylib.h"
 #include "raymath.h"
 #include "data_source.h"
@@ -19,24 +23,59 @@
 
 #define MAX_VEHICLES 16
 
-static const Color vehicle_colors[MAX_VEHICLES] = {
-    {230, 230, 230, 255}, // 0: white (default single)
-    {230,  41,  55, 255}, // 1: red
-    {  0, 228,  48, 255}, // 2: green
-    {  0, 121, 241, 255}, // 3: blue
-    {253, 249,   0, 255}, // 4: yellow
-    {255,   0, 255, 255}, // 5: magenta
-    {  0, 255, 255, 255}, // 6: cyan
-    {255, 161,   0, 255}, // 7: orange
-    {200, 122, 255, 255}, // 8: purple
-    {127, 106,  79, 255}, // 9: brown
-    {255, 109, 194, 255}, // 10: pink
-    {  0, 182, 172, 255}, // 11: teal
-    {135, 206, 235, 255}, // 12: sky blue
-    {255, 203, 164, 255}, // 13: peach
-    {170, 255, 128, 255}, // 14: lime
-    {200, 200, 200, 255}, // 15: silver
+// Per-view-mode vehicle palettes. Slots 1-6 match trail directional colors.
+// Alternating warm/cool so adjacent drones are visually distinct.
+static const Color vehicle_palette_grid[MAX_VEHICLES] = {
+    {230, 230, 230, 255}, // 0: white (primary)
+    { 40, 120, 255, 255}, // 1: blue (cool)
+    {255,  40,  80, 255}, // 2: red (warm)
+    {255, 200,  50, 255}, // 3: yellow (warm)
+    { 40, 255,  80, 255}, // 4: green (cool)
+    {255, 140,   0, 255}, // 5: orange (warm)
+    {160,  60, 255, 255}, // 6: purple (cool)
+    {255, 100, 180, 255}, // 7: pink (warm)
+    {  0, 180, 140, 255}, // 8: teal (cool)
+    {200, 180,  80, 255}, // 9: gold (warm)
+    {100, 100, 255, 255}, // 10: indigo (cool)
+    {255, 180, 100, 255}, // 11: peach (warm)
+    {100, 220, 200, 255}, // 12: mint (cool)
+    {220,  80, 180, 255}, // 13: magenta (warm)
+    {120, 200, 255, 255}, // 14: sky blue (cool)
+    {180, 255,  60, 255}, // 15: lime (cool)
 };
+static const Color vehicle_palette_rez[MAX_VEHICLES] = {
+    {200, 208, 218, 255}, { 30, 100, 240, 255}, {255,  40,  80, 255},
+    {220, 180,  30, 255}, { 40, 255, 100, 255}, {255, 160,   0, 255},
+    {160,  40, 240, 255}, {255,  80, 160, 255}, {  0, 160, 130, 255},
+    {180, 160,  60, 255}, { 80,  90, 240, 255}, {240, 170,  90, 255},
+    { 80, 200, 180, 255}, {200,  60, 160, 255}, {100, 180, 240, 255},
+    {160, 240,  50, 255},
+};
+static const Color vehicle_palette_snow[MAX_VEHICLES] = {
+    { 40,  40,  50, 255}, { 20,  80, 160, 255}, {200,  20,  60, 255},
+    {200, 140,  20, 255}, { 20, 160,  40, 255}, {160,  20,  80, 255},
+    {140,  20, 200, 255}, {180,  40, 100, 255}, {  0, 120, 100, 255},
+    {180, 120,  40, 255}, { 60,  60, 180, 255}, {140, 120,  40, 255},
+    { 40, 140, 120, 255}, {160,  40, 120, 255}, { 60, 130, 180, 255},
+    {120, 160,  20, 255},
+};
+static const Color vehicle_palette_1988[MAX_VEHICLES] = {
+    {255, 255, 255, 255}, { 60, 100, 255, 255}, {255,  40,  80, 255},
+    {255, 220,  60, 255}, { 40, 255,  80, 255}, {255, 140,   0, 255},
+    {180,  40, 255, 255}, {255,  20, 100, 255}, {  0, 200, 160, 255},
+    {255, 180,  60, 255}, {120,  60, 255, 255}, {255, 255, 100, 255},
+    { 60, 255, 200, 255}, {255,  60, 200, 255}, { 60, 200, 255, 255},
+    {200, 255,  40, 255},
+};
+
+static const Color *get_vehicle_palette(view_mode_t vm) {
+    switch (vm) {
+        case VIEW_SNOW: return vehicle_palette_snow;
+        case VIEW_REZ:  return vehicle_palette_rez;
+        case VIEW_1988: return vehicle_palette_1988;
+        default:        return vehicle_palette_grid;
+    }
+}
 
 static void print_usage(const char *prog) {
     printf("Usage: %s [options]\n", prog);
@@ -46,7 +85,8 @@ static void print_usage(const char *prog) {
     printf("  -fw            Fixed-wing model\n");
     printf("  -ts            Tailsitter model\n");
     printf("  -origin <lat> <lon> <alt>  NED origin in degrees/meters (default: PX4 SIH)\n");
-    printf("  --replay <file.ulg>  Replay ULog file\n");
+    printf("  --replay <file1.ulg> [file2.ulg ...]  Replay ULog file(s)\n");
+    printf("  --ghost <file1.ulg> [file2.ulg ...]   Ghost mode replay\n");
     printf("  -w <width>     Window width (default: 1280)\n");
     printf("  -h <height>    Window height (default: 720)\n");
 }
@@ -63,7 +103,9 @@ int main(int argc, char *argv[]) {
     double origin_lon = 8.545594;
     double origin_alt = 489.4;
     bool origin_specified = false;
-    const char *replay_file = NULL;
+    char *replay_paths[MAX_VEHICLES] = {0};
+    int num_replay_files = 0;
+    bool ghost_mode = false;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-udp") == 0 && i + 1 < argc) {
@@ -89,8 +131,23 @@ int main(int argc, char *argv[]) {
             win_w = atoi(argv[++i]);
         } else if (strcmp(argv[i], "-h") == 0 && i + 1 < argc) {
             win_h = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "--replay") == 0 && i + 1 < argc) {
-            replay_file = argv[++i];
+        } else if (strcmp(argv[i], "--replay") == 0) {
+            while (i + 1 < argc && argv[i + 1][0] != '-') {
+                if (num_replay_files >= MAX_VEHICLES) {
+                    fprintf(stderr, "Too many replay files (max %d)\n", MAX_VEHICLES);
+                    return 1;
+                }
+                replay_paths[num_replay_files++] = argv[++i];
+            }
+        } else if (strcmp(argv[i], "--ghost") == 0) {
+            ghost_mode = true;
+            while (i + 1 < argc && argv[i + 1][0] != '-') {
+                if (num_replay_files >= MAX_VEHICLES) {
+                    fprintf(stderr, "Too many replay files (max %d)\n", MAX_VEHICLES);
+                    return 1;
+                }
+                replay_paths[num_replay_files++] = argv[++i];
+            }
         } else if (strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -107,15 +164,17 @@ int main(int argc, char *argv[]) {
     // Init data sources
     data_source_t sources[MAX_VEHICLES];
     memset(sources, 0, sizeof(sources));
-    bool is_replay = (replay_file != NULL);
+    bool is_replay = (num_replay_files > 0);
 
     if (is_replay) {
-        vehicle_count = 1;  // single vehicle replay (multi-file is future scope)
-        if (data_source_ulog_create(&sources[0], replay_file) != 0) {
-            fprintf(stderr, "Failed to open ULog: %s\n", replay_file);
-            CloseWindow();
-            return 1;
+        for (int i = 0; i < num_replay_files; i++) {
+            if (data_source_ulog_create(&sources[i], replay_paths[i]) != 0) {
+                fprintf(stderr, "Failed to open ULog: %s\n", replay_paths[i]);
+                CloseWindow();
+                return 1;
+            }
         }
+        vehicle_count = num_replay_files;
     } else {
         for (int i = 0; i < vehicle_count; i++) {
             if (data_source_mavlink_create(&sources[i], base_port + i, (uint8_t)i, debug) != 0) {
@@ -134,11 +193,11 @@ int main(int argc, char *argv[]) {
     vehicle_t vehicles[MAX_VEHICLES];
     for (int i = 0; i < vehicle_count; i++) {
         vehicle_init(&vehicles[i], model_idx, scene.lighting_shader);
-        vehicles[i].color = vehicle_colors[i];
+        vehicles[i].color = get_vehicle_palette(scene.view_mode)[i];
     }
 
-    // For multi-vehicle or explicit origin: pre-set the NED origin on all vehicles
-    if (vehicle_count > 1 || origin_specified) {
+    // For multi-vehicle MAVLink or explicit origin: pre-set the NED origin
+    if (!is_replay && (vehicle_count > 1 || origin_specified)) {
         double lat0_rad = origin_lat * (M_PI / 180.0);
         double lon0_rad = origin_lon * (M_PI / 180.0);
         for (int i = 0; i < vehicle_count; i++) {
@@ -148,6 +207,24 @@ int main(int argc, char *argv[]) {
             vehicles[i].origin_set = true;
         }
         printf("NED origin: lat=%.6f lon=%.6f alt=%.1f\n", origin_lat, origin_lon, origin_alt);
+    } else if (origin_specified) {
+        double lat0_rad = origin_lat * (M_PI / 180.0);
+        double lon0_rad = origin_lon * (M_PI / 180.0);
+        for (int i = 0; i < vehicle_count; i++) {
+            vehicles[i].lat0 = lat0_rad;
+            vehicles[i].lon0 = lon0_rad;
+            vehicles[i].alt0 = origin_alt;
+            vehicles[i].origin_set = true;
+        }
+    }
+
+    // Apply ghost mode: translucent non-primary drones
+    // Origin sharing is handled at runtime — when vehicle[0]'s origin is set
+    // during playback, we copy it to all other vehicles (see main loop below)
+    if (ghost_mode && num_replay_files > 1) {
+        vehicle_set_ghost_alpha(&vehicles[0], 1.0f);
+        for (int i = 1; i < num_replay_files; i++)
+            vehicle_set_ghost_alpha(&vehicles[i], 0.35f);
     }
 
     hud_t hud;
@@ -201,6 +278,20 @@ int main(int argc, char *argv[]) {
             last_pos[i] = vehicles[i].position;
         }
 
+        // Ghost mode: once both primary and secondary drones have positions,
+        // compute offset to collapse secondary onto primary's location
+        if (ghost_mode && num_replay_files > 1 && vehicles[0].active) {
+            for (int i = 1; i < num_replay_files; i++) {
+                if (vehicles[i].active && vehicles[i].grid_offset.x == 0.0f
+                    && vehicles[i].grid_offset.z == 0.0f) {
+                    // First frame both are active — snap secondary to primary
+                    vehicles[i].grid_offset.x = vehicles[0].position.x - vehicles[i].position.x;
+                    vehicles[i].grid_offset.y = vehicles[0].position.y - vehicles[i].position.y;
+                    vehicles[i].grid_offset.z = vehicles[0].position.z - vehicles[i].position.z;
+                }
+            }
+        }
+
         // Check if any source is connected (for HUD)
         bool any_connected = false;
         for (int i = 0; i < vehicle_count; i++) {
@@ -214,6 +305,13 @@ int main(int argc, char *argv[]) {
         // Handle input
         scene_handle_input(&scene);
 
+        // Update vehicle colors when view mode changes
+        {
+            const Color *pal = get_vehicle_palette(scene.view_mode);
+            for (int i = 0; i < vehicle_count; i++)
+                vehicles[i].color = pal[i];
+        }
+
         // Help overlay toggle (? key = Shift+/)
         if (IsKeyPressed(KEY_SLASH) && (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT))) {
             hud.show_help = !hud.show_help;
@@ -226,7 +324,8 @@ int main(int argc, char *argv[]) {
 
         // Cycle trail mode: off → trail → speed ribbon
         if (IsKeyPressed(KEY_T)) {
-            trail_mode = (trail_mode + 1) % 3;
+            int max_modes = (num_replay_files > 1) ? 4 : 3;
+            trail_mode = (trail_mode + 1) % max_modes;
         }
 
         // Toggle classic/modern arm colors
@@ -323,73 +422,86 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        // Replay playback controls
+        // Replay playback controls (apply to all sources)
         if (is_replay) {
+            int nrf = num_replay_files > 0 ? num_replay_files : 1;
             if (IsKeyPressed(KEY_SPACE)) {
-                if (!sources[0].connected) {
-                    // Replay ended — restart from beginning
-                    ulog_replay_ctx_t *rctx = (ulog_replay_ctx_t *)sources[0].impl;
-                    ulog_replay_seek(rctx, 0.0f);
-                    sources[0].connected = true;
-                    sources[0].playback.paused = false;
-                    vehicle_reset_trail(&vehicles[0]);
-                    vehicles[0].origin_set = false;
-                    vehicles[0].origin_wait_count = 0;
+                if (!sources[selected].connected) {
+                    for (int i = 0; i < nrf; i++) {
+                        ulog_replay_ctx_t *rctx = (ulog_replay_ctx_t *)sources[i].impl;
+                        ulog_replay_seek(rctx, 0.0f);
+                        sources[i].connected = true;
+                        sources[i].playback.paused = false;
+                        vehicle_reset_trail(&vehicles[i]);
+                    }
                 } else {
-                    sources[0].playback.paused = !sources[0].playback.paused;
+                    bool p = !sources[selected].playback.paused;
+                    for (int i = 0; i < nrf; i++)
+                        sources[i].playback.paused = p;
                 }
             }
             if (IsKeyPressed(KEY_L)) {
-                sources[0].playback.looping = !sources[0].playback.looping;
+                bool l = !sources[selected].playback.looping;
+                for (int i = 0; i < nrf; i++)
+                    sources[i].playback.looping = l;
             }
             if (IsKeyPressed(KEY_I)) {
-                sources[0].playback.interpolation = !sources[0].playback.interpolation;
-                printf("Interpolation: %s\n", sources[0].playback.interpolation ? "ON" : "OFF");
+                bool interp = !sources[selected].playback.interpolation;
+                for (int i = 0; i < nrf; i++)
+                    sources[i].playback.interpolation = interp;
+                printf("Interpolation: %s\n", interp ? "ON" : "OFF");
             }
             if (IsKeyPressed(KEY_EQUAL)) {
-                float *spd = &sources[0].playback.speed;
-                if (*spd < 0.5f) *spd = 0.5f;
-                else if (*spd < 1.0f) *spd = 1.0f;
-                else if (*spd < 2.0f) *spd = 2.0f;
-                else if (*spd < 4.0f) *spd = 4.0f;
-                else if (*spd < 8.0f) *spd = 8.0f;
-                else *spd = 16.0f;
+                float spd = sources[selected].playback.speed;
+                if (spd < 0.5f) spd = 0.5f;
+                else if (spd < 1.0f) spd = 1.0f;
+                else if (spd < 2.0f) spd = 2.0f;
+                else if (spd < 4.0f) spd = 4.0f;
+                else if (spd < 8.0f) spd = 8.0f;
+                else spd = 16.0f;
+                for (int i = 0; i < nrf; i++)
+                    sources[i].playback.speed = spd;
             }
             if (IsKeyPressed(KEY_MINUS)) {
-                float *spd = &sources[0].playback.speed;
-                if (*spd > 8.0f) *spd = 8.0f;
-                else if (*spd > 4.0f) *spd = 4.0f;
-                else if (*spd > 2.0f) *spd = 2.0f;
-                else if (*spd > 1.0f) *spd = 1.0f;
-                else if (*spd > 0.5f) *spd = 0.5f;
-                else *spd = 0.25f;
+                float spd = sources[selected].playback.speed;
+                if (spd > 8.0f) spd = 8.0f;
+                else if (spd > 4.0f) spd = 4.0f;
+                else if (spd > 2.0f) spd = 2.0f;
+                else if (spd > 1.0f) spd = 1.0f;
+                else if (spd > 0.5f) spd = 0.5f;
+                else spd = 0.25f;
+                for (int i = 0; i < nrf; i++)
+                    sources[i].playback.speed = spd;
             }
             if (IsKeyPressed(KEY_R)) {
-                ulog_replay_ctx_t *ctx = (ulog_replay_ctx_t *)sources[0].impl;
-                ulog_replay_seek(ctx, 0.0f);
-                sources[0].connected = true;
-                sources[0].playback.paused = false;
-                vehicle_reset_trail(&vehicles[0]);
-                vehicles[0].origin_set = false;
-                vehicles[0].origin_wait_count = 0;
+                for (int i = 0; i < nrf; i++) {
+                    ulog_replay_ctx_t *ctx = (ulog_replay_ctx_t *)sources[i].impl;
+                    ulog_replay_seek(ctx, 0.0f);
+                    sources[i].connected = true;
+                    sources[i].playback.paused = false;
+                    vehicle_reset_trail(&vehicles[i]);
+                }
             }
             if (IsKeyPressed(KEY_RIGHT)) {
-                ulog_replay_ctx_t *ctx = (ulog_replay_ctx_t *)sources[0].impl;
                 float step = (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) ? 30.0f : 5.0f;
-                ulog_replay_seek(ctx, sources[0].playback.position_s + step);
-                sources[0].playback.position_s = (float)ctx->wall_accum;
-                vehicle_reset_trail(&vehicles[0]);
+                float seek_target = sources[selected].playback.position_s + step;
+                for (int i = 0; i < nrf; i++) {
+                    ulog_replay_ctx_t *ctx = (ulog_replay_ctx_t *)sources[i].impl;
+                    ulog_replay_seek(ctx, seek_target);
+                    sources[i].playback.position_s = (float)ctx->wall_accum;
+                    vehicle_reset_trail(&vehicles[i]);
+                }
             }
             if (IsKeyPressed(KEY_LEFT)) {
-                ulog_replay_ctx_t *ctx = (ulog_replay_ctx_t *)sources[0].impl;
                 float step = (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) ? 30.0f : 5.0f;
-                float target = sources[0].playback.position_s - step;
+                float target = sources[selected].playback.position_s - step;
                 if (target < 0.0f) target = 0.0f;
-                ulog_replay_seek(ctx, target);
-                sources[0].playback.position_s = (float)ctx->wall_accum;
-                vehicle_reset_trail(&vehicles[0]);
-                vehicles[0].origin_set = false;
-                vehicles[0].origin_wait_count = 0;
+                for (int i = 0; i < nrf; i++) {
+                    ulog_replay_ctx_t *ctx = (ulog_replay_ctx_t *)sources[i].impl;
+                    ulog_replay_seek(ctx, target);
+                    sources[i].playback.position_s = (float)ctx->wall_accum;
+                    vehicle_reset_trail(&vehicles[i]);
+                }
             }
         }
 
