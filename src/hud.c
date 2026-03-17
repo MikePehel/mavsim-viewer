@@ -303,6 +303,35 @@ static void draw_secondary_row(const hud_t *h, const vehicle_t *pv, int pidx,
     snprintf(vnum, sizeof(vnum), "%d", pidx + 1);
     DrawTextEx(font_value, vnum, (Vector2){8 * scale, (float)(row_y + (int)(10 * scale))}, fsv, 0.5f, pv->color);
 
+    // Position tier badge
+    {
+        const char *tier_label;
+        Color tier_bg, tier_fg;
+        float badge_w = 28 * scale;
+        if (pv->pos_estimated) {
+            tier_label = "EST";
+            tier_bg = (Color){255, 191, 0, 180};
+            tier_fg = (Color){30, 20, 0, 255};
+        } else if (pv->pos_tier == 1) {
+            tier_label = "T1";
+            tier_bg = (Color){50, 180, 50, 180};
+            tier_fg = WHITE;
+        } else {
+            tier_label = "T2";
+            tier_bg = (Color){60, 120, 220, 180};
+            tier_fg = WHITE;
+        }
+        float badge_h = 14 * scale;
+        float badge_x = 8 * scale + MeasureTextEx(font_value, vnum, fsv, 0.5f).x + 6 * scale;
+        float badge_y = (float)(row_y + (int)(12 * scale));
+        DrawRectangleRounded((Rectangle){badge_x, badge_y, badge_w, badge_h}, 0.5f, 4, tier_bg);
+        float tier_fs = 8 * scale;
+        Vector2 tw = MeasureTextEx(font_label, tier_label, tier_fs, 1);
+        DrawTextEx(font_label, tier_label,
+                   (Vector2){badge_x + (badge_w - tw.x) / 2, badge_y + (badge_h - tw.y) / 2},
+                   tier_fs, 1, tier_fg);
+    }
+
     int text_y = row_y + (int)(10 * scale);
     float label_off_y = (float)(row_y + (int)(4 * scale));
     char b[16];
@@ -584,6 +613,43 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
     float adi_cx = comp_cx + inst_radius * 2 + inst_pad + 8 * s;
     draw_attitude(adi_cx, inst_y, inst_radius, v->roll_deg, v->pitch_deg, view_mode);
 
+    // TASK 1: CONF readout below compass (multi-replay with pinned vehicles only)
+    if (vehicle_count > 1 && h->is_replay && h->pinned_count > 0) {
+        float conf_min = 1.0f;
+        bool has_pinned = false;
+        for (int p = 0; p < h->pinned_count; p++) {
+            int pidx = h->pinned[p];
+            if (pidx >= 0 && pidx < vehicle_count && pidx != selected) {
+                float tc = vehicles[pidx].temporal_confidence;
+                if (tc < conf_min) conf_min = tc;
+                has_pinned = true;
+            }
+        }
+        if (has_pinned) {
+            Color conf_color;
+            if (conf_min > 0.65f) conf_color = (Color){50, 205, 50, 255};       // green
+            else if (conf_min > 0.35f) conf_color = (Color){255, 191, 0, 255};  // amber
+            else conf_color = (Color){220, 50, 50, 255};                         // red
+
+            float conf_y = inst_y + inst_radius + 10 * s;
+            float conf_fs_l = 12 * s;
+            float conf_fs_v = 14 * s;
+            DrawTextEx(h->font_label, "CONF", (Vector2){comp_cx - inst_radius * 0.6f, conf_y}, conf_fs_l, 0.5f, label_color);
+            char conf_buf[8];
+            snprintf(conf_buf, sizeof(conf_buf), "%.2f", conf_min);
+            Vector2 lw = MeasureTextEx(h->font_label, "CONF", conf_fs_l, 0.5f);
+            DrawTextEx(h->font_value, conf_buf, (Vector2){comp_cx - inst_radius * 0.6f + lw.x + 4 * s, conf_y}, conf_fs_v, 0.5f, conf_color);
+        }
+
+        // CORR placeholder below attitude indicator
+        float corr_y = inst_y + inst_radius + 10 * s;
+        float corr_fs_l = 12 * s;
+        float corr_fs_v = 14 * s;
+        DrawTextEx(h->font_label, "CORR", (Vector2){adi_cx - inst_radius * 0.6f, corr_y}, corr_fs_l, 0.5f, dim_color);
+        Vector2 corr_lw = MeasureTextEx(h->font_label, "CORR", corr_fs_l, 0.5f);
+        DrawTextEx(h->font_value, "---", (Vector2){adi_cx - inst_radius * 0.6f + corr_lw.x + 4 * s, corr_y}, corr_fs_v, 0.5f, dim_color);
+    }
+
     // Separator drawing helper
     Color sep_color = (Color){accent.r, accent.g, accent.b, 50};
     int sep_top = bar_y + (int)(24 * s);
@@ -781,6 +847,27 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
         char fps_buf[16];
         snprintf(fps_buf, sizeof(fps_buf), "FPS: %d", GetFPS());
         DrawTextEx(h->font_label, fps_buf, (Vector2){status_x + 14 * s, (float)(status_y + (int)(18 * s))}, fs_dim, 0.5f, dim_color);
+
+        // TASK 3: GHOST badge when any vehicle has ghost_alpha < 1.0
+        {
+            bool any_ghost = false;
+            for (int i = 0; i < vehicle_count; i++) {
+                if (vehicles[i].ghost_alpha < 1.0f) { any_ghost = true; break; }
+            }
+            if (any_ghost) {
+                Color ghost_bg = (Color){140, 80, 200, 180};
+                float ghost_badge_w = 52 * s;
+                float ghost_badge_h = 16 * s;
+                float ghost_x = status_x + 14 * s;
+                float ghost_y = (float)(status_y + (int)(36 * s));
+                DrawRectangleRounded((Rectangle){ghost_x, ghost_y, ghost_badge_w, ghost_badge_h}, 0.5f, 4, ghost_bg);
+                float ghost_fs = 10 * s;
+                Vector2 gtw = MeasureTextEx(h->font_label, "GHOST", ghost_fs, 1);
+                DrawTextEx(h->font_label, "GHOST",
+                           (Vector2){ghost_x + (ghost_badge_w - gtw.x) / 2, ghost_y + (ghost_badge_h - gtw.y) / 2},
+                           ghost_fs, 1, WHITE);
+            }
+        }
     }
 
     // Secondary row: position info
@@ -790,6 +877,23 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
         snprintf(b, sizeof(b), "Pos: %.1f, %.1f, %.1f",
                  v->position.x, v->position.y, v->position.z);
         DrawTextEx(h->font_label, b, (Vector2){nav_group_x, (float)row2_y}, fs_dim, 0.5f, dim_color);
+    }
+
+    // TASK 4: ESTIMATED POSITION warning when any vehicle is grid-placed
+    {
+        bool any_estimated = false;
+        for (int i = 0; i < vehicle_count; i++) {
+            if (vehicles[i].pos_estimated) { any_estimated = true; break; }
+        }
+        if (any_estimated) {
+            Color est_warn_color = (Color){255, 191, 0, 255};
+            float warn_fs = 14 * s;
+            const char *warn_text = "ESTIMATED POSITION";
+            Vector2 wtw = MeasureTextEx(h->font_label, warn_text, warn_fs, 0.5f);
+            float warn_x = (float)screen_w / 2.0f - wtw.x / 2.0f;
+            float warn_y = (float)bar_y - 24 * s;
+            DrawTextEx(h->font_label, warn_text, (Vector2){warn_x, warn_y}, warn_fs, 0.5f, est_warn_color);
+        }
     }
 
     // Draw pinned vehicle secondary rows

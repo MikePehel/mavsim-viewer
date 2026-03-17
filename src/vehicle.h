@@ -82,6 +82,10 @@ typedef struct {
     int loc_matNormal;       // shader uniform for normal matrix
     float ghost_alpha;       // 1.0 = fully opaque (default), 0.35 = ghost
     int   loc_ghost_alpha;   // shader uniform location for ghostAlpha
+    int   pos_tier;          // 1=home_position, 2=GPOS/LPOS, 3=grid-placed
+    float pos_confidence;    // 0.0-1.0 position confidence
+    bool  pos_estimated;     // true if grid-placed estimate
+    float temporal_confidence; // takeoff detection confidence (0.0-1.0)
 } vehicle_t;
 
 // Initialize vehicle state and load the model at model_idx. shader is optional lighting shader (id=0 to skip).
