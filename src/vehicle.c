@@ -338,10 +338,10 @@ void vehicle_update(vehicle_t *v, const hil_state_t *state, const home_position_
     double jmav_z = alt - v->alt0;                                   // Up
 
     // NED frame → Raylib (X=right, Y=up, Z=back)
-    v->position.x = (float)jmav_y;
-    v->position.y = (float)jmav_z;
+    v->position.x = (float)jmav_y + v->grid_offset.x;
+    v->position.y = (float)jmav_z + v->grid_offset.y;
     if (v->position.y < 0.0f) v->position.y = 0.0f;
-    v->position.z = (float)(-jmav_x);
+    v->position.z = (float)(-jmav_x) + v->grid_offset.z;
 
     // MAVLink quaternion: w,x,y,z in NED frame → Raylib
     float qw = state->quaternion[0];
@@ -546,7 +546,15 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
     }
 
     if (v->ghost_alpha < 1.0f) rlDisableDepthMask();
-    DrawModel(v->model, (Vector3){0}, 1.0f, WHITE);
+    // Ghost drones get a subtle tint of their vehicle color (~20% blend)
+    Color model_tint = WHITE;
+    if (v->ghost_alpha < 1.0f) {
+        float t = 0.5f;
+        model_tint.r = (unsigned char)(255 * (1.0f - t) + v->color.r * t);
+        model_tint.g = (unsigned char)(255 * (1.0f - t) + v->color.g * t);
+        model_tint.b = (unsigned char)(255 * (1.0f - t) + v->color.b * t);
+    }
+    DrawModel(v->model, (Vector3){0}, 1.0f, model_tint);
     if (v->ghost_alpha < 1.0f) rlEnableDepthMask();
 
     // Draw path trail (mode 1) or speed ribbon (mode 2)
@@ -666,6 +674,19 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
                 rlVertex3f(d.x, d.y, d.z); rlVertex3f(b.x, b.y, b.z); rlVertex3f(a.x, a.y, a.z);
                 rlVertex3f(d.x, d.y, d.z); rlVertex3f(e.x, e.y, e.z); rlVertex3f(b.x, b.y, b.z);
             }
+        }
+        rlEnd();
+      } else if (trail_mode == 3) {
+        // ── Drone-color trail: solid vehicle color with age fade ──
+        rlBegin(RL_LINES);
+        for (int i = 1; i < v->trail_count; i++) {
+            int idx0 = (start + i - 1) % v->trail_capacity;
+            int idx1 = (start + i) % v->trail_capacity;
+            float t = (float)i / (float)v->trail_count;
+            unsigned char ca = (unsigned char)(t * 200 * v->ghost_alpha);
+            rlColor4ub(v->color.r, v->color.g, v->color.b, ca);
+            rlVertex3f(v->trail[idx0].x, v->trail[idx0].y, v->trail[idx0].z);
+            rlVertex3f(v->trail[idx1].x, v->trail[idx1].y, v->trail[idx1].z);
         }
         rlEnd();
       } else {

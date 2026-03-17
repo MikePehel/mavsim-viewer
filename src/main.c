@@ -23,24 +23,94 @@
 
 #define MAX_VEHICLES 16
 
-static const Color vehicle_colors[MAX_VEHICLES] = {
-    {230, 230, 230, 255}, // 0: white (default single)
-    {230,  41,  55, 255}, // 1: red
-    {  0, 228,  48, 255}, // 2: green
-    {  0, 121, 241, 255}, // 3: blue
-    {253, 249,   0, 255}, // 4: yellow
-    {255,   0, 255, 255}, // 5: magenta
-    {  0, 255, 255, 255}, // 6: cyan
-    {255, 161,   0, 255}, // 7: orange
-    {200, 122, 255, 255}, // 8: purple
-    {127, 106,  79, 255}, // 9: brown
-    {255, 109, 194, 255}, // 10: pink
-    {  0, 182, 172, 255}, // 11: teal
-    {135, 206, 235, 255}, // 12: sky blue
-    {255, 203, 164, 255}, // 13: peach
-    {170, 255, 128, 255}, // 14: lime
-    {200, 200, 200, 255}, // 15: silver
+// Per-view-mode vehicle palettes — slots 0-6 match trail directional colors,
+// slots 7-15 extend the family with harmonious additions.
+// Order: 0=white/primary, 1=red/port, 2=green/starboard, 3=cyan/up,
+//        4=yellow/forward, 5=purple/back, 6=orange/down, 7-15=extended
+// Alternating warm/cool so adjacent drones are visually distinct.
+// Even slots = warm (red/yellow/orange/pink), odd slots = cool (cyan/green/purple/blue)
+static const Color vehicle_palette_grid[MAX_VEHICLES] = {
+    {230, 230, 230, 255}, // 0: white (primary)
+    { 40, 120, 255, 255}, // 1: blue (cool)
+    {255,  40,  80, 255}, // 2: red (warm)
+    {255, 200,  50, 255}, // 3: yellow (warm)
+    { 40, 255,  80, 255}, // 4: green (cool)
+    {255, 140,   0, 255}, // 5: orange (warm)
+    {160,  60, 255, 255}, // 6: purple (cool)
+    {255, 100, 180, 255}, // 7: pink (warm)
+    {  0, 180, 140, 255}, // 8: teal (cool)
+    {200, 180,  80, 255}, // 9: gold (warm)
+    {100, 100, 255, 255}, // 10: indigo (cool)
+    {255, 180, 100, 255}, // 11: peach (warm)
+    {100, 220, 200, 255}, // 12: mint (cool)
+    {220,  80, 180, 255}, // 13: magenta (warm)
+    {120, 200, 255, 255}, // 14: sky blue (cool)
+    {180, 255,  60, 255}, // 15: lime (cool)
 };
+static const Color vehicle_palette_rez[MAX_VEHICLES] = {
+    {200, 208, 218, 255}, // 0: silver (primary)
+    { 30, 100, 240, 255}, // 1: blue (cool)
+    {255,  40,  80, 255}, // 2: red (warm)
+    {220, 180,  30, 255}, // 3: gold (warm)
+    { 40, 255, 100, 255}, // 4: green (cool)
+    {255, 160,   0, 255}, // 5: amber (warm)
+    {160,  40, 240, 255}, // 6: purple (cool)
+    {255,  80, 160, 255}, // 7: pink (warm)
+    {  0, 160, 130, 255}, // 8: teal (cool)
+    {180, 160,  60, 255}, // 9: gold dim (warm)
+    { 80,  90, 240, 255}, // 10: indigo (cool)
+    {240, 170,  90, 255}, // 11: peach (warm)
+    { 80, 200, 180, 255}, // 12: mint (cool)
+    {200,  60, 160, 255}, // 13: magenta (warm)
+    {100, 180, 240, 255}, // 14: sky blue (cool)
+    {160, 240,  50, 255}, // 15: lime (cool)
+};
+static const Color vehicle_palette_snow[MAX_VEHICLES] = {
+    { 40,  40,  50, 255}, // 0: dark (primary)
+    { 20,  80, 160, 255}, // 1: dark blue (cool)
+    {200,  20,  60, 255}, // 2: red (warm)
+    {200, 140,  20, 255}, // 3: dark amber (warm)
+    { 20, 160,  40, 255}, // 4: green (cool)
+    {160,  20,  80, 255}, // 5: crimson (warm)
+    {140,  20, 200, 255}, // 6: purple (cool)
+    {180,  40, 100, 255}, // 7: berry (warm)
+    {  0, 120, 100, 255}, // 8: dark teal (cool)
+    {180, 120,  40, 255}, // 9: brown (warm)
+    { 60,  60, 180, 255}, // 10: navy (cool)
+    {140, 120,  40, 255}, // 11: dark gold (warm)
+    { 40, 140, 120, 255}, // 12: sage (cool)
+    {160,  40, 120, 255}, // 13: plum (warm)
+    { 60, 130, 180, 255}, // 14: steel blue (cool)
+    {120, 160,  20, 255}, // 15: olive (cool)
+};
+static const Color vehicle_palette_1988[MAX_VEHICLES] = {
+    {255, 255, 255, 255}, // 0: white (primary)
+    { 60, 100, 255, 255}, // 1: electric blue (cool)
+    {255,  40,  80, 255}, // 2: red (warm)
+    {255, 220,  60, 255}, // 3: warm yellow (warm)
+    { 40, 255,  80, 255}, // 4: green (cool)
+    {255, 140,   0, 255}, // 5: orange (warm)
+    {180,  40, 255, 255}, // 6: violet (cool)
+    {255,  20, 100, 255}, // 7: hot pink (warm)
+    {  0, 200, 160, 255}, // 8: neon teal (cool)
+    {255, 180,  60, 255}, // 9: neon peach (warm)
+    {120,  60, 255, 255}, // 10: electric purple (cool)
+    {255, 255, 100, 255}, // 11: neon yellow (warm)
+    { 60, 255, 200, 255}, // 12: neon mint (cool)
+    {255,  60, 200, 255}, // 13: neon magenta (warm)
+    { 60, 200, 255, 255}, // 14: neon sky (cool)
+    {200, 255,  40, 255}, // 15: neon lime (cool)
+};
+
+// Returns the palette for the current view mode
+static const Color *get_vehicle_palette(view_mode_t vm) {
+    switch (vm) {
+        case VIEW_SNOW: return vehicle_palette_snow;
+        case VIEW_REZ:  return vehicle_palette_rez;
+        case VIEW_1988: return vehicle_palette_1988;
+        default:        return vehicle_palette_grid;
+    }
+}
 
 // Position resolution tier for spatial conflict detection
 typedef struct {
@@ -80,6 +150,7 @@ int main(int argc, char *argv[]) {
     char *replay_paths[MAX_VEHICLES] = {0};
     int num_replay_files = 0;
     bool ghost_mode = false;
+    bool ghost_mode_grid = false;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-udp") == 0 && i + 1 < argc) {
@@ -116,6 +187,13 @@ int main(int argc, char *argv[]) {
             }
         } else if (strcmp(argv[i], "--ghost") == 0) {
             ghost_mode = true;
+            while (i + 1 < argc && argv[i + 1][0] != '-') {
+                if (num_replay_files >= MAX_VEHICLES) {
+                    fprintf(stderr, "Too many replay files (max %d)\n", MAX_VEHICLES);
+                    return 1;
+                }
+                replay_paths[num_replay_files++] = argv[++i];
+            }
         } else if (strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -161,7 +239,7 @@ int main(int argc, char *argv[]) {
     vehicle_t vehicles[MAX_VEHICLES];
     for (int i = 0; i < vehicle_count; i++) {
         vehicle_init(&vehicles[i], model_idx, scene.lighting_shader);
-        vehicles[i].color = vehicle_colors[i];
+        vehicles[i].color = get_vehicle_palette(scene.view_mode)[i];
     }
 
     // Position resolution for all vehicles (hoisted for use by HUD state population)
@@ -169,6 +247,13 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < MAX_VEHICLES; i++) {
         resolve[i] = (position_resolution_t){ .tier = 1, .confidence = 1.0f, .estimated = false };
     }
+
+    // Init HUD early so fonts are available for conflict prompt
+    hud_t hud;
+    hud_init(&hud);
+    hud.is_replay = is_replay;
+
+    bool conflict_far = false;
 
     // Spatial conflict detection + resolution (multi-file replay only)
     if (is_replay && num_replay_files > 1) {
@@ -192,29 +277,28 @@ int main(int argc, char *argv[]) {
 
         // Detect conflicts
         bool conflict = false;
+        conflict_far = false;  // true = too far apart, false = too close/no data
 
         // Count drones with tier 3 (no position)
         int tier3_count = 0;
         for (int i = 0; i < num_replay_files; i++) {
             if (resolve[i].tier == 3) tier3_count++;
         }
-        if (tier3_count > 1) conflict = true;
+        if (tier3_count > 0) conflict = true;
 
-        // Pairwise proximity check (within 3.0m)
+        // Pairwise distance check
         if (!conflict) {
             for (int i = 0; i < num_replay_files && !conflict; i++) {
                 if (!sources[i].home.valid) continue;
                 for (int j = i + 1; j < num_replay_files && !conflict; j++) {
                     if (!sources[j].home.valid) continue;
-                    double dlat_degE7 = (double)(sources[i].home.lat - sources[j].home.lat);
-                    double dlon_degE7 = (double)(sources[i].home.lon - sources[j].home.lon);
-                    double dalt_mm = (double)(sources[i].home.alt - sources[j].home.alt);
-                    double dlat_m = dlat_degE7 / 1e7 * 111319.5;
+                    double dlat_m = (double)(sources[i].home.lat - sources[j].home.lat) / 1e7 * 111319.5;
                     double lat_rad = (sources[i].home.lat / 1e7) * (M_PI / 180.0);
-                    double dlon_m = dlon_degE7 / 1e7 * 111319.5 * cos(lat_rad);
-                    double dalt_m = dalt_mm / 1000.0;
+                    double dlon_m = (double)(sources[i].home.lon - sources[j].home.lon) / 1e7 * 111319.5 * cos(lat_rad);
+                    double dalt_m = (double)(sources[i].home.alt - sources[j].home.alt) / 1000.0;
                     double dist = sqrt(dlat_m * dlat_m + dlon_m * dlon_m + dalt_m * dalt_m);
-                    if (dist < 3.0) conflict = true;
+                    if (dist < 0.1) conflict = true;            // shared origin
+                    if (dist > 1000.0) { conflict = true; conflict_far = true; }  // too far
                 }
             }
         }
@@ -225,49 +309,122 @@ int main(int argc, char *argv[]) {
             while (choice == 0 && !WindowShouldClose()) {
                 int sw = GetScreenWidth();
                 int sh = GetScreenHeight();
+                float s = powf(sh / 720.0f, 0.7f);
+                if (s < 1.0f) s = 1.0f;
 
                 int key = GetKeyPressed();
                 if (key == KEY_ONE) choice = 1;
                 else if (key == KEY_TWO) choice = 2;
                 else if (key == KEY_THREE) choice = 3;
 
+                Color scrim_col, box_bg, box_border, subtitle_col, hint_col, key_col, text_col, title_col;
+                if (scene.view_mode == VIEW_SNOW) {
+                    scrim_col    = (Color){255,255,255,140};
+                    box_bg       = (Color){248,248,250,240};
+                    box_border   = (Color){15,15,20,120};
+                    subtitle_col = (Color){60,65,75,255};
+                    hint_col     = (Color){120,125,135,200};
+                    key_col      = (Color){15,15,20,220};
+                    text_col     = (Color){10,10,15,255};
+                    title_col    = (Color){200,140,0,255};
+                } else if (scene.view_mode == VIEW_1988) {
+                    scrim_col    = (Color){5,0,15,160};
+                    box_bg       = (Color){5,5,16,240};
+                    box_border   = (Color){255,20,100,140};
+                    subtitle_col = (Color){255,20,100,200};
+                    hint_col     = (Color){180,60,120,160};
+                    key_col      = (Color){255,220,60,255};
+                    text_col     = (Color){255,220,60,255};
+                    title_col    = (Color){255,20,100,255};
+                } else if (scene.view_mode == VIEW_REZ) {
+                    scrim_col    = (Color){0,0,0,150};
+                    box_bg       = (Color){8,8,12,235};
+                    box_border   = (Color){0,204,218,100};
+                    subtitle_col = (Color){0,140,150,160};
+                    hint_col     = (Color){0,140,150,160};
+                    key_col      = (Color){0,204,218,220};
+                    text_col     = (Color){200,208,218,255};
+                    title_col    = YELLOW;
+                } else {
+                    scrim_col    = (Color){0,0,0,140};
+                    box_bg       = (Color){10,14,20,235};
+                    box_border   = (Color){0,180,204,100};
+                    subtitle_col = (Color){140,150,170,255};
+                    hint_col     = (Color){90,95,110,200};
+                    key_col      = (Color){0,255,255,220};
+                    text_col     = WHITE;
+                    title_col    = YELLOW;
+                }
+
+                float fs_title = 15 * s;
+                float fs_option = 20 * s;
+                float fs_hint  = 12 * s;
+                float line_h   = 36 * s;
+                float pad      = 16 * s;
+                float inner_gap = 20 * s;
+
+                const char *grid_label = conflict_far ? "Narrow grid offset" : "Grid offset";
+                const char *labels[] = {"Cancel & reupload", "Ghost mode", grid_label};
+                float key_num_w = MeasureTextEx(hud.font_value, "1", fs_option, 0.5f).x;
+                float gap = 16 * s;
+
+                float widest = 0;
+                for (int o = 0; o < 3; o++) {
+                    float w = key_num_w + gap + MeasureTextEx(hud.font_label, labels[o], fs_option, 0.5f).x;
+                    if (w > widest) widest = w;
+                }
+
+                const char *title_main = "POSITION CONFLICT";
+                char title_rest[64];
+                if (conflict_far)
+                    snprintf(title_rest, sizeof(title_rest), "  -  %d drones too far apart", num_replay_files);
+                else
+                    snprintf(title_rest, sizeof(title_rest), "  -  %d drones overlap", num_replay_files);
+                Vector2 tmw = MeasureTextEx(hud.font_label, title_main, fs_title, 0.5f);
+                Vector2 trw = MeasureTextEx(hud.font_label, title_rest, fs_title, 0.5f);
+                float title_total = tmw.x + trw.x;
+
+                float box_w_f = 520 * s;
+                float opts_block_h = line_h * 3;
+                float box_h_f = pad + fs_title + inner_gap + opts_block_h + inner_gap * 0.3f + fs_hint + pad * 0.5f;
+                float cx = sw / 2.0f;
+                float cy = sh / 2.0f;
+                float bx = cx - box_w_f / 2.0f;
+                float by = cy - box_h_f / 2.0f;
+
                 BeginDrawing();
-                    ClearBackground(DARKGRAY);
+                    scene_draw_sky(&scene);
+                    BeginMode3D(scene.camera);
+                        scene_draw(&scene);
+                    EndMode3D();
+                    DrawRectangle(0, 0, sw, sh, scrim_col);
 
-                    // Semi-transparent overlay
-                    DrawRectangle(0, 0, sw, sh, (Color){0, 0, 0, 160});
+                    Rectangle box = {bx, by, box_w_f, box_h_f};
+                    DrawRectangleRounded(box, 0.06f, 8, box_bg);
+                    DrawRectangleRoundedLinesEx(box, 0.06f, 8, 1.5f * s, box_border);
 
-                    // Centered dialog box
-                    int box_w = 520;
-                    int box_h = 260;
-                    int bx = (sw - box_w) / 2;
-                    int by = (sh - box_h) / 2;
-                    DrawRectangle(bx, by, box_w, box_h, (Color){40, 40, 40, 240});
-                    DrawRectangleLines(bx, by, box_w, box_h, RAYWHITE);
+                    float title_x = cx - title_total / 2.0f;
+                    DrawTextEx(hud.font_label, title_main,
+                               (Vector2){title_x, by + pad}, fs_title, 0.5f, title_col);
+                    DrawTextEx(hud.font_label, title_rest,
+                               (Vector2){title_x + tmw.x, by + pad}, fs_title, 0.5f, subtitle_col);
 
-                    // Title
-                    const char *title = "Position Conflict Detected";
-                    int tw = MeasureText(title, 24);
-                    DrawText(title, bx + (box_w - tw) / 2, by + 20, 24, YELLOW);
+                    float left = cx - widest / 2.0f;
+                    float opts_y = by + pad + fs_title + inner_gap;
+                    for (int o = 0; o < 3; o++) {
+                        float oy = opts_y + o * line_h;
+                        char num[2] = {(char)('1' + o), '\0'};
+                        DrawTextEx(hud.font_value, num,
+                                   (Vector2){left, oy}, fs_option, 0.5f, key_col);
+                        DrawTextEx(hud.font_label, labels[o],
+                                   (Vector2){left + key_num_w + gap, oy}, fs_option, 0.5f, text_col);
+                    }
 
-                    // Subtitle
-                    char subtitle[128];
-                    snprintf(subtitle, sizeof(subtitle),
-                             "%d drones resolved to the same position.", num_replay_files);
-                    int stw = MeasureText(subtitle, 18);
-                    DrawText(subtitle, bx + (box_w - stw) / 2, by + 55, 18, LIGHTGRAY);
-
-                    // Options
-                    int opt_x = bx + 40;
-                    int opt_y = by + 100;
-                    DrawText("[1] Cancel & Reupload", opt_x, opt_y, 20, WHITE);
-                    DrawText("[2] Ghost Mode - overlap accepted", opt_x, opt_y + 35, 20, WHITE);
-                    DrawText("[3] Grid Offset - auto-space drones", opt_x, opt_y + 70, 20, WHITE);
-
-                    // Footer
-                    const char *footer = "Press 1, 2, or 3";
-                    int fw_text = MeasureText(footer, 16);
-                    DrawText(footer, bx + (box_w - fw_text) / 2, by + box_h - 30, 16, GRAY);
+                    const char *hint = "Press 1, 2, or 3";
+                    Vector2 hw = MeasureTextEx(hud.font_label, hint, fs_hint, 0.5f);
+                    DrawTextEx(hud.font_label, hint,
+                               (Vector2){cx - hw.x / 2.0f, by + box_h_f - pad * 0.5f - fs_hint},
+                               fs_hint, 0.5f, hint_col);
 
                 EndDrawing();
             }
@@ -292,41 +449,7 @@ int main(int argc, char *argv[]) {
             } else if (choice == 2) {
                 ghost_mode = true;
             } else if (choice == 3) {
-                // Grid offset: space estimated drones on a grid
-                float drone_w = 3.0f;
-                float gap = drone_w * 1.5f;
-                int est_count = 0;
-                for (int i = 0; i < num_replay_files; i++) {
-                    if (resolve[i].estimated) est_count++;
-                }
-                int cols = (int)ceil(sqrt((double)est_count));
-                int est_idx = 0;
-                for (int i = 0; i < num_replay_files; i++) {
-                    if (!resolve[i].estimated) continue;
-                    int row = est_idx / cols;
-                    int col = est_idx % cols;
-                    // Offset home position in meters, converted to degE7
-                    // 1 meter ≈ 1/111319.5 degrees latitude
-                    double offset_n = row * gap;
-                    double offset_e = col * gap;
-                    double lat_rad = 0.0;
-                    if (sources[0].home.valid)
-                        lat_rad = (sources[0].home.lat / 1e7) * (M_PI / 180.0);
-                    int32_t dlat = (int32_t)(offset_n / 111319.5 * 1e7);
-                    int32_t dlon = (int32_t)(offset_e / (111319.5 * cos(lat_rad)) * 1e7);
-                    sources[i].home.lat += dlat;
-                    sources[i].home.lon += dlon;
-                    if (!sources[i].home.valid) {
-                        // Give it a position based on the first valid source
-                        if (sources[0].home.valid) {
-                            sources[i].home.lat = sources[0].home.lat + dlat;
-                            sources[i].home.lon = sources[0].home.lon + dlon;
-                            sources[i].home.alt = sources[0].home.alt;
-                            sources[i].home.valid = true;
-                        }
-                    }
-                    est_idx++;
-                }
+                ghost_mode_grid = true;
             }
         } else if (conflict && ghost_mode) {
             // --ghost was set via CLI: auto-accept overlap
@@ -362,11 +485,52 @@ int main(int argc, char *argv[]) {
             for (int i = 0; i < num_replay_files; i++) {
                 vehicles[i].lat0 = lat0_rad;
                 vehicles[i].lon0 = lon0_rad;
-                vehicles[i].alt0 = min_alt / 1000.0;
+                if (conflict_far) {
+                    // Each drone uses own home alt — different locations, relative alt matters
+                    ulog_replay_ctx_t *r = (ulog_replay_ctx_t *)sources[i].impl;
+                    vehicles[i].alt0 = r->home.valid ? r->home.alt / 1000.0 : min_alt / 1000.0;
+                } else {
+                    vehicles[i].alt0 = min_alt / 1000.0;
+                }
                 vehicles[i].origin_set = true;
             }
             printf("Multi-replay NED origin: lat=%.6f lon=%.6f alt=%.1f\n",
                    origin_lat, origin_lon, min_alt / 1000.0);
+        }
+
+        // Grid offset
+        if (ghost_mode_grid) {
+            if (conflict_far) {
+                // Narrow: compute what vehicle_update would produce for each drone's
+                // home position relative to the shared origin, then negate it.
+                double ref_lat_rad = vehicles[0].lat0;  // shared origin in radians
+                double ref_lon_rad = vehicles[0].lon0;
+                for (int i = 1; i < num_replay_files; i++) {
+                    if (!sources[i].home.valid) continue;
+                    double home_lat_rad = (sources[i].home.lat / 1e7) * (M_PI / 180.0);
+                    double home_lon_rad = (sources[i].home.lon / 1e7) * (M_PI / 180.0);
+                    double home_alt_m = sources[i].home.alt / 1000.0;
+                    // Same math as vehicle_update lines 336-338
+                    double jmav_x = 6371000.0 * (home_lat_rad - ref_lat_rad);       // North
+                    double jmav_y = 6371000.0 * (home_lon_rad - ref_lon_rad) * cos(ref_lat_rad); // East
+                    double jmav_z = home_alt_m - vehicles[0].alt0;                   // Up
+                    // position.x = jmav_y, position.z = -jmav_x
+                    // Negate to collapse + add 1m spacing
+                    vehicles[i].grid_offset = (Vector3){
+                        (float)(-jmav_y + i * 1.0),
+                        (float)(-jmav_z),
+                        (float)(jmav_x)
+                    };
+                    printf("  Narrow grid: drone %d offset=(%.0f, %.0f, %.0f) + %dm\n",
+                           i, -jmav_y, -jmav_z, jmav_x, i);
+                }
+            } else {
+                // Normal: just shift apart
+                for (int i = 1; i < num_replay_files; i++) {
+                    vehicles[i].grid_offset = (Vector3){ i * 5.0f, 0.0f, 0.0f };
+                    printf("  Grid offset: drone %d shifted %dm east\n", i, i * 5);
+                }
+            }
         }
     } else if (vehicle_count > 1 || origin_specified) {
         // Original behavior for MAVLink multi-vehicle or explicit origin
@@ -381,19 +545,11 @@ int main(int argc, char *argv[]) {
         printf("NED origin: lat=%.6f lon=%.6f alt=%.1f\n", origin_lat, origin_lon, origin_alt);
     }
 
-    // ── Temporal alignment (Task 2) ──
+    // ── Temporal alignment (Task 2) — disabled until CUSUM thresholds are tuned ──
     if (num_replay_files > 1) {
-        ulog_replay_ctx_t *ref = (ulog_replay_ctx_t *)sources[0].impl;
-        uint64_t ref_anchor = ref->takeoff_anchor.anchor_usec;
-
         for (int i = 0; i < num_replay_files; i++) {
             ulog_replay_ctx_t *r = (ulog_replay_ctx_t *)sources[i].impl;
-            if (r->takeoff_anchor.method > 0 && ref_anchor > 0) {
-                r->time_offset = (int64_t)ref_anchor
-                               - (int64_t)r->takeoff_anchor.anchor_usec;
-            } else {
-                r->time_offset = 0;
-            }
+            r->time_offset = 0;
         }
 
         printf("Temporal alignment:\n");
@@ -437,10 +593,6 @@ int main(int argc, char *argv[]) {
             }
         }
     }
-
-    hud_t hud;
-    hud_init(&hud);
-    hud.is_replay = is_replay;
 
     debug_panel_t dbg_panel;
     debug_panel_init(&dbg_panel);
@@ -499,8 +651,101 @@ int main(int argc, char *argv[]) {
         hud_update(&hud, sources[selected].state.time_usec,
                    sources[selected].connected, GetFrameTime());
 
+        // P key: reopen deconfliction menu
+        if (IsKeyPressed(KEY_P) && is_replay && num_replay_files > 1) {
+            int ch = 0;
+            while (ch == 0 && !WindowShouldClose()) {
+                int psw = GetScreenWidth(), psh = GetScreenHeight();
+                float ps = powf(psh / 720.0f, 0.7f);
+                if (ps < 1.0f) ps = 1.0f;
+                int pk = GetKeyPressed();
+                if (pk == KEY_ONE) ch = 1;
+                else if (pk == KEY_TWO) ch = 2;
+                else if (pk == KEY_THREE) ch = 3;
+                // View-mode colors
+                Color pscrim, pbbg, pbbd, psub, phint, pkc, ptc, pttl;
+                if (scene.view_mode == VIEW_SNOW) {
+                    pscrim=(Color){255,255,255,140}; pbbg=(Color){248,248,250,240};
+                    pbbd=(Color){15,15,20,120}; psub=(Color){60,65,75,255};
+                    phint=(Color){120,125,135,200}; pkc=(Color){15,15,20,220};
+                    ptc=(Color){10,10,15,255}; pttl=(Color){200,140,0,255};
+                } else if (scene.view_mode == VIEW_1988) {
+                    pscrim=(Color){5,0,15,160}; pbbg=(Color){5,5,16,240};
+                    pbbd=(Color){255,20,100,140}; psub=(Color){255,20,100,200};
+                    phint=(Color){180,60,120,160}; pkc=(Color){255,220,60,255};
+                    ptc=(Color){255,220,60,255}; pttl=(Color){255,20,100,255};
+                } else if (scene.view_mode == VIEW_REZ) {
+                    pscrim=(Color){0,0,0,150}; pbbg=(Color){8,8,12,235};
+                    pbbd=(Color){0,204,218,100}; psub=(Color){0,140,150,160};
+                    phint=(Color){0,140,150,160}; pkc=(Color){0,204,218,220};
+                    ptc=(Color){200,208,218,255}; pttl=YELLOW;
+                } else {
+                    pscrim=(Color){0,0,0,140}; pbbg=(Color){10,14,20,235};
+                    pbbd=(Color){0,180,204,100}; psub=(Color){140,150,170,255};
+                    phint=(Color){90,95,110,200}; pkc=(Color){0,255,255,220};
+                    ptc=WHITE; pttl=YELLOW;
+                }
+                float pfs_t=15*ps, pfs_o=20*ps, pfs_h=12*ps, plh=36*ps, pp=16*ps, pig=20*ps;
+                const char *pl[]={"Cancel","Ghost mode","Grid offset"};
+                float pkw=MeasureTextEx(hud.font_value,"1",pfs_o,0.5f).x, pg=16*ps, pw=0;
+                for(int o=0;o<3;o++){float w=pkw+pg+MeasureTextEx(hud.font_label,pl[o],pfs_o,0.5f).x;if(w>pw)pw=w;}
+                float pbw=520*ps, pbh=pp+pfs_t+pig+plh*3+pig*0.3f+pfs_h+pp*0.5f;
+                float pcx=psw/2.0f, pcy=psh/2.0f, pbx=pcx-pbw/2, pby=pcy-pbh/2;
+                BeginDrawing();
+                scene_draw_sky(&scene);
+                BeginMode3D(scene.camera);scene_draw(&scene);EndMode3D();
+                DrawRectangle(0,0,psw,psh,pscrim);
+                Rectangle pb={pbx,pby,pbw,pbh};
+                DrawRectangleRounded(pb,0.06f,8,pbbg);
+                DrawRectangleRoundedLinesEx(pb,0.06f,8,1.5f*ps,pbbd);
+                const char*pt1="POSITION CONFLICT";char pt2[64];
+                snprintf(pt2,sizeof(pt2),"  -  %d drones overlap",num_replay_files);
+                Vector2 ptm=MeasureTextEx(hud.font_label,pt1,pfs_t,0.5f);
+                Vector2 ptr=MeasureTextEx(hud.font_label,pt2,pfs_t,0.5f);
+                float ptx=pcx-(ptm.x+ptr.x)/2;
+                DrawTextEx(hud.font_label,pt1,(Vector2){ptx,pby+pp},pfs_t,0.5f,pttl);
+                DrawTextEx(hud.font_label,pt2,(Vector2){ptx+ptm.x,pby+pp},pfs_t,0.5f,psub);
+                float pleft=pcx-pw/2, poy=pby+pp+pfs_t+pig;
+                for(int o=0;o<3;o++){
+                    char n[2]={(char)('1'+o),'\0'};
+                    DrawTextEx(hud.font_value,n,(Vector2){pleft,poy+o*plh},pfs_o,0.5f,pkc);
+                    DrawTextEx(hud.font_label,pl[o],(Vector2){pleft+pkw+pg,poy+o*plh},pfs_o,0.5f,ptc);
+                }
+                const char*pht="Press 1, 2, or 3";
+                Vector2 phw=MeasureTextEx(hud.font_label,pht,pfs_h,0.5f);
+                DrawTextEx(hud.font_label,pht,(Vector2){pcx-phw.x/2,pby+pbh-pp*0.5f-pfs_h},pfs_h,0.5f,phint);
+                EndDrawing();
+            }
+            if (ch == 2) {
+                ghost_mode = true; ghost_mode_grid = false;
+                vehicle_set_ghost_alpha(&vehicles[0], 1.0f);
+                for (int i=1;i<num_replay_files;i++){
+                    vehicles[i].grid_offset=(Vector3){0,0,0};
+                    vehicle_set_ghost_alpha(&vehicles[i],0.35f);
+                }
+            } else if (ch == 3) {
+                ghost_mode = false; ghost_mode_grid = true;
+                for (int i=0;i<num_replay_files;i++) vehicle_set_ghost_alpha(&vehicles[i],1.0f);
+                for (int i=1;i<num_replay_files;i++)
+                    vehicles[i].grid_offset=(Vector3){i*5.0f,0,0};
+            } else {
+                ghost_mode = false; ghost_mode_grid = false;
+                for (int i=0;i<num_replay_files;i++){
+                    vehicles[i].grid_offset=(Vector3){0,0,0};
+                    vehicle_set_ghost_alpha(&vehicles[i],1.0f);
+                }
+            }
+        }
+
         // Handle input
         scene_handle_input(&scene);
+
+        // Update vehicle colors when view mode changes
+        {
+            const Color *pal = get_vehicle_palette(scene.view_mode);
+            for (int i = 0; i < vehicle_count; i++)
+                vehicles[i].color = pal[i];
+        }
 
         // Help overlay toggle (? key = Shift+/)
         if (IsKeyPressed(KEY_SLASH) && (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT))) {
@@ -514,7 +759,9 @@ int main(int argc, char *argv[]) {
 
         // Cycle trail mode: off → trail → speed ribbon
         if (IsKeyPressed(KEY_T)) {
-            trail_mode = (trail_mode + 1) % 3;
+            // Multi-drone: add drone-color trail mode (0=off, 1=directional, 2=speed, 3=drone color)
+            int max_modes = (num_replay_files > 1) ? 4 : 3;
+            trail_mode = (trail_mode + 1) % max_modes;
         }
 
         // Toggle classic/modern arm colors

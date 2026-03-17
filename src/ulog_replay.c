@@ -332,11 +332,17 @@ int ulog_replay_init(ulog_replay_ctx_t *ctx, const char *filepath) {
     {
         bool got_type = false;
         uint8_t prev_nav = 0xFF;
+        bool got_home = false;
 
-        // CUSUM state
+        // Message IDs for topic matching during pre-scan
         uint16_t vstatus_msg_id = (ctx->sub_vehicle_status >= 0)
             ? ctx->parser.subs[ctx->sub_vehicle_status].msg_id : 0xFFFF;
-        uint16_t lpos_msg_id = ctx->parser.subs[ctx->sub_local_pos].msg_id;
+        uint16_t lpos_msg_id = (ctx->sub_local_pos >= 0)
+            ? ctx->parser.subs[ctx->sub_local_pos].msg_id : 0xFFFF;
+        uint16_t home_msg_id = (ctx->sub_home_pos >= 0)
+            ? ctx->parser.subs[ctx->sub_home_pos].msg_id : 0xFFFF;
+        uint16_t gpos_msg_id = (ctx->sub_global_pos >= 0)
+            ? ctx->parser.subs[ctx->sub_global_pos].msg_id : 0xFFFF;
 
         // Baseline estimation buffers
         #define CUSUM_MAX_BASELINE 500
@@ -449,6 +455,34 @@ int ulog_replay_init(ulog_replay_ctx_t *ctx, const char *filepath) {
                 if (cusum_triggered) {
                     float z = ulog_parser_get_float(&scan_msg, ctx->cache.lpos_z_offset);
                     if (z < min_z_after_detect) min_z_after_detect = z;
+                }
+            }
+
+            // Pre-resolve home: home_position topic (Tier 1)
+            if (!got_home && scan_msg.msg_id == home_msg_id) {
+                double lat = ulog_parser_get_double(&scan_msg, ctx->cache.home_lat_offset);
+                double lon = ulog_parser_get_double(&scan_msg, ctx->cache.home_lon_offset);
+                float alt = ulog_parser_get_float(&scan_msg, ctx->cache.home_alt_offset);
+                if (lat != 0.0 || lon != 0.0) {
+                    ctx->home.lat = (int32_t)(lat * 1e7);
+                    ctx->home.lon = (int32_t)(lon * 1e7);
+                    ctx->home.alt = (int32_t)(alt * 1000.0f);
+                    ctx->home.valid = true;
+                    ctx->home_from_topic = true;
+                    got_home = true;
+                }
+            }
+            // Fallback: GPOS (Tier 2)
+            if (!got_home && scan_msg.msg_id == gpos_msg_id) {
+                double lat = ulog_parser_get_double(&scan_msg, ctx->cache.gpos_lat_offset);
+                double lon = ulog_parser_get_double(&scan_msg, ctx->cache.gpos_lon_offset);
+                float alt = ulog_parser_get_float(&scan_msg, ctx->cache.gpos_alt_offset);
+                if (lat != 0.0 || lon != 0.0) {
+                    ctx->home.lat = (int32_t)(lat * 1e7);
+                    ctx->home.lon = (int32_t)(lon * 1e7);
+                    ctx->home.alt = (int32_t)(alt * 1000.0f);
+                    ctx->home.valid = true;
+                    got_home = true;
                 }
             }
         }

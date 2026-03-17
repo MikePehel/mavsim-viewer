@@ -42,6 +42,7 @@ extern const int vehicle_model_count;
 typedef struct {
     Model model;
     Vector3 position;        // Raylib coords (Y-up, right-handed)
+    Vector3 grid_offset;     // spatial offset for grid deconfliction (meters, Raylib coords)
     Quaternion rotation;     // Raylib quaternion
     int model_idx;           // index into vehicle_models[]
     model_group_t model_group; // active group for M-key cycling

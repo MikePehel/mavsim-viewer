@@ -886,13 +886,12 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
             if (vehicles[i].pos_estimated) { any_estimated = true; break; }
         }
         if (any_estimated) {
-            Color est_warn_color = (Color){255, 191, 0, 255};
             float warn_fs = 14 * s;
             const char *warn_text = "ESTIMATED POSITION";
             Vector2 wtw = MeasureTextEx(h->font_label, warn_text, warn_fs, 0.5f);
             float warn_x = (float)screen_w / 2.0f - wtw.x / 2.0f;
-            float warn_y = (float)bar_y - 24 * s;
-            DrawTextEx(h->font_label, warn_text, (Vector2){warn_x, warn_y}, warn_fs, 0.5f, est_warn_color);
+            float warn_y = (float)bar_y - 28 * s;
+            DrawTextEx(h->font_label, warn_text, (Vector2){warn_x, warn_y}, warn_fs, 0.5f, warn);
         }
     }
 
