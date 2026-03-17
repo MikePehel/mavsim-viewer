@@ -6,6 +6,10 @@
 #endif
 #include <math.h>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 #include "raylib.h"
 #include "raymath.h"
 #include "data_source.h"
@@ -38,6 +42,13 @@ static const Color vehicle_colors[MAX_VEHICLES] = {
     {200, 200, 200, 255}, // 15: silver
 };
 
+// Position resolution tier for spatial conflict detection
+typedef struct {
+    int   tier;        // 1=home_position topic, 2=GPOS derived, 3=grid
+    float confidence;  // 1.0, 0.85, or 0.5
+    bool  estimated;   // true if tier 3
+} position_resolution_t;
+
 static void print_usage(const char *prog) {
     printf("Usage: %s [options]\n", prog);
     printf("  -udp <port>    UDP base port (default: 19410)\n");
@@ -46,7 +57,8 @@ static void print_usage(const char *prog) {
     printf("  -fw            Fixed-wing model\n");
     printf("  -ts            Tailsitter model\n");
     printf("  -origin <lat> <lon> <alt>  NED origin in degrees/meters (default: PX4 SIH)\n");
-    printf("  --replay <file.ulg>  Replay ULog file\n");
+    printf("  --replay <file1.ulg> [file2.ulg ...]  Replay ULog file(s)\n");
+    printf("  --ghost        Accept position overlaps without prompting\n");
     printf("  -w <width>     Window width (default: 1280)\n");
     printf("  -h <height>    Window height (default: 720)\n");
 }
@@ -63,7 +75,11 @@ int main(int argc, char *argv[]) {
     double origin_lon = 8.545594;
     double origin_alt = 489.4;
     bool origin_specified = false;
-    const char *replay_file = NULL;
+
+    // TASK 1: Multi-file replay + ghost flag
+    char *replay_paths[MAX_VEHICLES] = {0};
+    int num_replay_files = 0;
+    bool ghost_mode = false;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-udp") == 0 && i + 1 < argc) {
@@ -89,8 +105,17 @@ int main(int argc, char *argv[]) {
             win_w = atoi(argv[++i]);
         } else if (strcmp(argv[i], "-h") == 0 && i + 1 < argc) {
             win_h = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "--replay") == 0 && i + 1 < argc) {
-            replay_file = argv[++i];
+        } else if (strcmp(argv[i], "--replay") == 0) {
+            // Collect all subsequent args that look like file paths (not flags)
+            while (i + 1 < argc && argv[i + 1][0] != '-') {
+                if (num_replay_files >= MAX_VEHICLES) {
+                    fprintf(stderr, "Too many replay files (max %d)\n", MAX_VEHICLES);
+                    return 1;
+                }
+                replay_paths[num_replay_files++] = argv[++i];
+            }
+        } else if (strcmp(argv[i], "--ghost") == 0) {
+            ghost_mode = true;
         } else if (strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -107,15 +132,18 @@ int main(int argc, char *argv[]) {
     // Init data sources
     data_source_t sources[MAX_VEHICLES];
     memset(sources, 0, sizeof(sources));
-    bool is_replay = (replay_file != NULL);
+    bool is_replay = (num_replay_files > 0);
 
+    // TASK 2: Initialize multiple replay sources
     if (is_replay) {
-        vehicle_count = 1;  // single vehicle replay (multi-file is future scope)
-        if (data_source_ulog_create(&sources[0], replay_file) != 0) {
-            fprintf(stderr, "Failed to open ULog: %s\n", replay_file);
-            CloseWindow();
-            return 1;
+        for (int i = 0; i < num_replay_files; i++) {
+            if (data_source_ulog_create(&sources[i], replay_paths[i]) != 0) {
+                fprintf(stderr, "Failed to open ULog: %s\n", replay_paths[i]);
+                CloseWindow();
+                return 1;
+            }
         }
+        vehicle_count = num_replay_files;
     } else {
         for (int i = 0; i < vehicle_count; i++) {
             if (data_source_mavlink_create(&sources[i], base_port + i, (uint8_t)i, debug) != 0) {
@@ -126,7 +154,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Init vehicles
     // Init scene first (provides lighting shader for vehicles)
     scene_t scene;
     scene_init(&scene);
@@ -137,8 +164,204 @@ int main(int argc, char *argv[]) {
         vehicles[i].color = vehicle_colors[i];
     }
 
-    // For multi-vehicle or explicit origin: pre-set the NED origin on all vehicles
-    if (vehicle_count > 1 || origin_specified) {
+    // TASK 3: Spatial conflict detection + resolution (multi-file replay only)
+    if (is_replay && num_replay_files > 1) {
+        // Determine position resolution tier for each drone
+        position_resolution_t resolve[MAX_VEHICLES];
+        for (int i = 0; i < num_replay_files; i++) {
+            ulog_replay_ctx_t *r = (ulog_replay_ctx_t *)sources[i].impl;
+            if (r->home.valid) {
+                // TODO: After merge with agent 1A, refine: if home_from_topic → tier 1, conf 1.0
+                resolve[i].tier = 2;
+                resolve[i].confidence = 0.85f;
+                resolve[i].estimated = false;
+            } else {
+                resolve[i].tier = 3;
+                resolve[i].confidence = 0.5f;
+                resolve[i].estimated = true;
+            }
+        }
+
+        // Detect conflicts
+        bool conflict = false;
+
+        // Count drones with tier 3 (no position)
+        int tier3_count = 0;
+        for (int i = 0; i < num_replay_files; i++) {
+            if (resolve[i].tier == 3) tier3_count++;
+        }
+        if (tier3_count > 1) conflict = true;
+
+        // Pairwise proximity check (within 3.0m)
+        if (!conflict) {
+            for (int i = 0; i < num_replay_files && !conflict; i++) {
+                if (!sources[i].home.valid) continue;
+                for (int j = i + 1; j < num_replay_files && !conflict; j++) {
+                    if (!sources[j].home.valid) continue;
+                    double dlat_degE7 = (double)(sources[i].home.lat - sources[j].home.lat);
+                    double dlon_degE7 = (double)(sources[i].home.lon - sources[j].home.lon);
+                    double dalt_mm = (double)(sources[i].home.alt - sources[j].home.alt);
+                    double dlat_m = dlat_degE7 / 1e7 * 111319.5;
+                    double lat_rad = (sources[i].home.lat / 1e7) * (M_PI / 180.0);
+                    double dlon_m = dlon_degE7 / 1e7 * 111319.5 * cos(lat_rad);
+                    double dalt_m = dalt_mm / 1000.0;
+                    double dist = sqrt(dlat_m * dlat_m + dlon_m * dlon_m + dalt_m * dalt_m);
+                    if (dist < 3.0) conflict = true;
+                }
+            }
+        }
+
+        // Show blocking modal if conflict detected and --ghost not set
+        if (conflict && !ghost_mode) {
+            int choice = 0; // 0 = waiting, 1 = cancel, 2 = ghost, 3 = grid
+            while (choice == 0 && !WindowShouldClose()) {
+                int sw = GetScreenWidth();
+                int sh = GetScreenHeight();
+
+                int key = GetKeyPressed();
+                if (key == KEY_ONE) choice = 1;
+                else if (key == KEY_TWO) choice = 2;
+                else if (key == KEY_THREE) choice = 3;
+
+                BeginDrawing();
+                    ClearBackground(DARKGRAY);
+
+                    // Semi-transparent overlay
+                    DrawRectangle(0, 0, sw, sh, (Color){0, 0, 0, 160});
+
+                    // Centered dialog box
+                    int box_w = 520;
+                    int box_h = 260;
+                    int bx = (sw - box_w) / 2;
+                    int by = (sh - box_h) / 2;
+                    DrawRectangle(bx, by, box_w, box_h, (Color){40, 40, 40, 240});
+                    DrawRectangleLines(bx, by, box_w, box_h, RAYWHITE);
+
+                    // Title
+                    const char *title = "Position Conflict Detected";
+                    int tw = MeasureText(title, 24);
+                    DrawText(title, bx + (box_w - tw) / 2, by + 20, 24, YELLOW);
+
+                    // Subtitle
+                    char subtitle[128];
+                    snprintf(subtitle, sizeof(subtitle),
+                             "%d drones resolved to the same position.", num_replay_files);
+                    int stw = MeasureText(subtitle, 18);
+                    DrawText(subtitle, bx + (box_w - stw) / 2, by + 55, 18, LIGHTGRAY);
+
+                    // Options
+                    int opt_x = bx + 40;
+                    int opt_y = by + 100;
+                    DrawText("[1] Cancel & Reupload", opt_x, opt_y, 20, WHITE);
+                    DrawText("[2] Ghost Mode - overlap accepted", opt_x, opt_y + 35, 20, WHITE);
+                    DrawText("[3] Grid Offset - auto-space drones", opt_x, opt_y + 70, 20, WHITE);
+
+                    // Footer
+                    const char *footer = "Press 1, 2, or 3";
+                    int fw_text = MeasureText(footer, 16);
+                    DrawText(footer, bx + (box_w - fw_text) / 2, by + box_h - 30, 16, GRAY);
+
+                EndDrawing();
+            }
+
+            if (choice == 1 || WindowShouldClose()) {
+                // Cancel: close all sources, fall back to zero vehicles
+                for (int i = 0; i < num_replay_files; i++) {
+                    data_source_close(&sources[i]);
+                }
+                memset(sources, 0, sizeof(sources));
+                num_replay_files = 0;
+                vehicle_count = 0;
+                is_replay = false;
+                if (WindowShouldClose()) {
+                    // Clean up and exit
+                    for (int i = 0; i < vehicle_count; i++)
+                        vehicle_cleanup(&vehicles[i]);
+                    scene_cleanup(&scene);
+                    CloseWindow();
+                    return 0;
+                }
+            } else if (choice == 2) {
+                ghost_mode = true;
+            } else if (choice == 3) {
+                // Grid offset: space estimated drones on a grid
+                float drone_w = 3.0f;
+                float gap = drone_w * 1.5f;
+                int est_count = 0;
+                for (int i = 0; i < num_replay_files; i++) {
+                    if (resolve[i].estimated) est_count++;
+                }
+                int cols = (int)ceil(sqrt((double)est_count));
+                int est_idx = 0;
+                for (int i = 0; i < num_replay_files; i++) {
+                    if (!resolve[i].estimated) continue;
+                    int row = est_idx / cols;
+                    int col = est_idx % cols;
+                    // Offset home position in meters, converted to degE7
+                    // 1 meter ≈ 1/111319.5 degrees latitude
+                    double offset_n = row * gap;
+                    double offset_e = col * gap;
+                    double lat_rad = 0.0;
+                    if (sources[0].home.valid)
+                        lat_rad = (sources[0].home.lat / 1e7) * (M_PI / 180.0);
+                    int32_t dlat = (int32_t)(offset_n / 111319.5 * 1e7);
+                    int32_t dlon = (int32_t)(offset_e / (111319.5 * cos(lat_rad)) * 1e7);
+                    sources[i].home.lat += dlat;
+                    sources[i].home.lon += dlon;
+                    if (!sources[i].home.valid) {
+                        // Give it a position based on the first valid source
+                        if (sources[0].home.valid) {
+                            sources[i].home.lat = sources[0].home.lat + dlat;
+                            sources[i].home.lon = sources[0].home.lon + dlon;
+                            sources[i].home.alt = sources[0].home.alt;
+                            sources[i].home.valid = true;
+                        }
+                    }
+                    est_idx++;
+                }
+            }
+        } else if (conflict && ghost_mode) {
+            // --ghost was set via CLI: auto-accept overlap
+            printf("Ghost mode: position overlaps accepted\n");
+        }
+    }
+
+    // TASK 4: Shared origin + ground datum (multi-file replay)
+    if (is_replay && num_replay_files > 1) {
+        // Shared lat/lon origin = first log's home
+        ulog_replay_ctx_t *ref = (ulog_replay_ctx_t *)sources[0].impl;
+        if (ref->home.valid) {
+            origin_lat = ref->home.lat / 1e7;
+            origin_lon = ref->home.lon / 1e7;
+        }
+
+        // Ground datum = lowest altitude across all logs
+        int32_t min_alt = ref->home.alt;
+        bool found_valid = ref->home.valid;
+        for (int i = 1; i < num_replay_files; i++) {
+            ulog_replay_ctx_t *r = (ulog_replay_ctx_t *)sources[i].impl;
+            if (r->home.valid) {
+                if (!found_valid || r->home.alt < min_alt) {
+                    min_alt = r->home.alt;
+                    found_valid = true;
+                }
+            }
+        }
+
+        if (found_valid) {
+            double lat0_rad = origin_lat * (M_PI / 180.0);
+            double lon0_rad = origin_lon * (M_PI / 180.0);
+            for (int i = 0; i < num_replay_files; i++) {
+                vehicles[i].lat0 = lat0_rad;
+                vehicles[i].lon0 = lon0_rad;
+                vehicles[i].alt0 = min_alt / 1000.0;
+                vehicles[i].origin_set = true;
+            }
+            printf("Multi-replay NED origin: lat=%.6f lon=%.6f alt=%.1f\n",
+                   origin_lat, origin_lon, min_alt / 1000.0);
+        }
+    } else if (vehicle_count > 1 || origin_specified) {
+        // Original behavior for MAVLink multi-vehicle or explicit origin
         double lat0_rad = origin_lat * (M_PI / 180.0);
         double lon0_rad = origin_lon * (M_PI / 180.0);
         for (int i = 0; i < vehicle_count; i++) {
@@ -323,73 +546,100 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        // Replay playback controls
+        // TASK 5: Replay playback controls — apply to all sources
         if (is_replay) {
             if (IsKeyPressed(KEY_SPACE)) {
-                if (!sources[0].connected) {
-                    // Replay ended — restart from beginning
-                    ulog_replay_ctx_t *rctx = (ulog_replay_ctx_t *)sources[0].impl;
-                    ulog_replay_seek(rctx, 0.0f);
-                    sources[0].connected = true;
-                    sources[0].playback.paused = false;
-                    vehicle_reset_trail(&vehicles[0]);
-                    vehicles[0].origin_set = false;
-                    vehicles[0].origin_wait_count = 0;
+                // Check if any source has ended
+                bool any_ended = false;
+                for (int i = 0; i < num_replay_files; i++) {
+                    if (!sources[i].connected) { any_ended = true; break; }
+                }
+                if (any_ended) {
+                    // Replay ended — restart all from beginning
+                    for (int i = 0; i < num_replay_files; i++) {
+                        ulog_replay_ctx_t *rctx = (ulog_replay_ctx_t *)sources[i].impl;
+                        ulog_replay_seek(rctx, 0.0f);
+                        sources[i].connected = true;
+                        sources[i].playback.paused = false;
+                        vehicle_reset_trail(&vehicles[i]);
+                        vehicles[i].origin_set = false;
+                        vehicles[i].origin_wait_count = 0;
+                    }
                 } else {
-                    sources[0].playback.paused = !sources[0].playback.paused;
+                    for (int i = 0; i < num_replay_files; i++) {
+                        sources[i].playback.paused = !sources[i].playback.paused;
+                    }
                 }
             }
             if (IsKeyPressed(KEY_L)) {
-                sources[0].playback.looping = !sources[0].playback.looping;
+                for (int i = 0; i < num_replay_files; i++) {
+                    sources[i].playback.looping = !sources[i].playback.looping;
+                }
             }
             if (IsKeyPressed(KEY_I)) {
-                sources[0].playback.interpolation = !sources[0].playback.interpolation;
-                printf("Interpolation: %s\n", sources[0].playback.interpolation ? "ON" : "OFF");
+                bool new_val = !sources[0].playback.interpolation;
+                for (int i = 0; i < num_replay_files; i++) {
+                    sources[i].playback.interpolation = new_val;
+                }
+                printf("Interpolation: %s\n", new_val ? "ON" : "OFF");
             }
             if (IsKeyPressed(KEY_EQUAL)) {
-                float *spd = &sources[0].playback.speed;
-                if (*spd < 0.5f) *spd = 0.5f;
-                else if (*spd < 1.0f) *spd = 1.0f;
-                else if (*spd < 2.0f) *spd = 2.0f;
-                else if (*spd < 4.0f) *spd = 4.0f;
-                else if (*spd < 8.0f) *spd = 8.0f;
-                else *spd = 16.0f;
+                // Speed up — use sources[0] as reference, apply to all
+                float spd = sources[0].playback.speed;
+                if (spd < 0.5f) spd = 0.5f;
+                else if (spd < 1.0f) spd = 1.0f;
+                else if (spd < 2.0f) spd = 2.0f;
+                else if (spd < 4.0f) spd = 4.0f;
+                else if (spd < 8.0f) spd = 8.0f;
+                else spd = 16.0f;
+                for (int i = 0; i < num_replay_files; i++) {
+                    sources[i].playback.speed = spd;
+                }
             }
             if (IsKeyPressed(KEY_MINUS)) {
-                float *spd = &sources[0].playback.speed;
-                if (*spd > 8.0f) *spd = 8.0f;
-                else if (*spd > 4.0f) *spd = 4.0f;
-                else if (*spd > 2.0f) *spd = 2.0f;
-                else if (*spd > 1.0f) *spd = 1.0f;
-                else if (*spd > 0.5f) *spd = 0.5f;
-                else *spd = 0.25f;
+                float spd = sources[0].playback.speed;
+                if (spd > 8.0f) spd = 8.0f;
+                else if (spd > 4.0f) spd = 4.0f;
+                else if (spd > 2.0f) spd = 2.0f;
+                else if (spd > 1.0f) spd = 1.0f;
+                else if (spd > 0.5f) spd = 0.5f;
+                else spd = 0.25f;
+                for (int i = 0; i < num_replay_files; i++) {
+                    sources[i].playback.speed = spd;
+                }
             }
             if (IsKeyPressed(KEY_R)) {
-                ulog_replay_ctx_t *ctx = (ulog_replay_ctx_t *)sources[0].impl;
-                ulog_replay_seek(ctx, 0.0f);
-                sources[0].connected = true;
-                sources[0].playback.paused = false;
-                vehicle_reset_trail(&vehicles[0]);
-                vehicles[0].origin_set = false;
-                vehicles[0].origin_wait_count = 0;
+                for (int i = 0; i < num_replay_files; i++) {
+                    ulog_replay_ctx_t *ctx = (ulog_replay_ctx_t *)sources[i].impl;
+                    ulog_replay_seek(ctx, 0.0f);
+                    sources[i].connected = true;
+                    sources[i].playback.paused = false;
+                    vehicle_reset_trail(&vehicles[i]);
+                    vehicles[i].origin_set = false;
+                    vehicles[i].origin_wait_count = 0;
+                }
             }
             if (IsKeyPressed(KEY_RIGHT)) {
-                ulog_replay_ctx_t *ctx = (ulog_replay_ctx_t *)sources[0].impl;
                 float step = (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) ? 30.0f : 5.0f;
-                ulog_replay_seek(ctx, sources[0].playback.position_s + step);
-                sources[0].playback.position_s = (float)ctx->wall_accum;
-                vehicle_reset_trail(&vehicles[0]);
+                for (int i = 0; i < num_replay_files; i++) {
+                    ulog_replay_ctx_t *ctx = (ulog_replay_ctx_t *)sources[i].impl;
+                    ulog_replay_seek(ctx, sources[i].playback.position_s + step);
+                    sources[i].playback.position_s = (float)ctx->wall_accum;
+                    vehicle_reset_trail(&vehicles[i]);
+                }
             }
             if (IsKeyPressed(KEY_LEFT)) {
-                ulog_replay_ctx_t *ctx = (ulog_replay_ctx_t *)sources[0].impl;
                 float step = (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) ? 30.0f : 5.0f;
-                float target = sources[0].playback.position_s - step;
-                if (target < 0.0f) target = 0.0f;
-                ulog_replay_seek(ctx, target);
-                sources[0].playback.position_s = (float)ctx->wall_accum;
-                vehicle_reset_trail(&vehicles[0]);
-                vehicles[0].origin_set = false;
-                vehicles[0].origin_wait_count = 0;
+                for (int i = 0; i < num_replay_files; i++) {
+                    ulog_replay_ctx_t *ctx = (ulog_replay_ctx_t *)sources[i].impl;
+                    float target = sources[i].playback.position_s - step;
+                    if (target < 0.0f) target = 0.0f;
+                    ulog_replay_seek(ctx, target);
+                    sources[i].playback.position_s = (float)ctx->wall_accum;
+                    vehicle_reset_trail(&vehicles[i]);
+                    vehicles[i].origin_set = false;
+                    vehicles[i].origin_wait_count = 0;
+                }
             }
         }
 
