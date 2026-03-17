@@ -39,7 +39,20 @@ typedef struct {
     int vstatus_type_offset;    // vehicle_status: vehicle_type
     int vstatus_is_vtol_offset; // vehicle_status: is_vtol
     int vstatus_nav_state_offset; // vehicle_status: nav_state
+
+    int home_lat_offset;        // home_position: lat (double, deg)
+    int home_lon_offset;        // home_position: lon (double, deg)
+    int home_alt_offset;        // home_position: alt (float, m)
 } ulog_field_cache_t;
+
+// Takeoff detection result (CUSUM changepoint + nav_state corroboration)
+typedef struct {
+    uint64_t anchor_usec;         // detected takeoff timestamp (boot micros)
+    int      method;              // 0=none, 1=CUSUM, 2=CUSUM+nav_state, 3=nav_state only
+    float    confidence;          // 0.0-1.0
+    float    onset_snr;           // signal-to-noise at detection
+    bool     nav_state_corroborated;
+} takeoff_anchor_t;
 
 typedef struct {
     ulog_parser_t parser;
@@ -50,6 +63,7 @@ typedef struct {
     int sub_local_pos;
     int sub_airspeed;
     int sub_vehicle_status;
+    int sub_home_pos;
 
     ulog_field_cache_t cache;
 
@@ -90,6 +104,13 @@ typedef struct {
 
     // First valid position becomes home
     bool first_pos_set;
+    bool home_from_topic;  // true = home set from home_position, not GPOS
+
+    // Takeoff detection
+    takeoff_anchor_t takeoff_anchor;
+
+    // Time offset for multi-vehicle synchronization (microseconds)
+    int64_t time_offset;
 } ulog_replay_ctx_t;
 
 // Initialize replay context, parse file, build index. Returns 0 on success.
@@ -107,8 +128,10 @@ void ulog_replay_close(ulog_replay_ctx_t *ctx);
 // Return short display name for a PX4 nav_state value.
 const char *ulog_nav_state_name(uint8_t nav_state);
 
-// Future scope: multi-file swarm replay with time synchronization.
-// Each vehicle would get its own ulog_replay_ctx_t with a time_offset
-// to align different log start times to a common playback clock.
+// Detect takeoff point using CUSUM changepoint detection on velocity energy.
+takeoff_anchor_t ulog_replay_detect_takeoff(const ulog_replay_ctx_t *ctx);
+
+// Return duration adjusted by time_offset for multi-vehicle alignment.
+float ulog_replay_aligned_duration(const ulog_replay_ctx_t *ctx);
 
 #endif

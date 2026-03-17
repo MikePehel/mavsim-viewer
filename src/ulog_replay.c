@@ -3,6 +3,14 @@
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+
+// CUSUM takeoff detection parameters
+#define CUSUM_DELTA       0.5f      // m/s — minimum velocity shift to detect
+#define CUSUM_H_FACTOR    5.0f      // threshold = factor * sigma_0
+#define PERSIST_GATE_USEC 500000    // 500ms — filters handling artifacts
+#define NOISE_WINDOW_USEC 5000000   // 5s — baseline estimation window
+#define NAV_AGREE_WINDOW  2000000   // 2s — CUSUM-nav_state agreement window
 
 // PX4 nav_state display names
 const char *ulog_nav_state_name(uint8_t nav_state) {
@@ -67,7 +75,26 @@ static void process_message(ulog_replay_ctx_t *ctx, const ulog_data_msg_t *dmsg)
     if (ctx->first_pos_set)
         ctx->state.valid = true;
 
-    if (sub_idx == ctx->sub_attitude) {
+    // home_position topic — authoritative home if available
+    if (sub_idx == ctx->sub_home_pos && ctx->sub_home_pos >= 0) {
+        double lat = 0, lon = 0;
+        float alt = 0;
+        if (ctx->cache.home_lat_offset >= 0)
+            lat = ulog_parser_get_double(dmsg, ctx->cache.home_lat_offset);
+        if (ctx->cache.home_lon_offset >= 0)
+            lon = ulog_parser_get_double(dmsg, ctx->cache.home_lon_offset);
+        if (ctx->cache.home_alt_offset >= 0)
+            alt = ulog_parser_get_float(dmsg, ctx->cache.home_alt_offset);
+        if (lat != 0.0 || lon != 0.0) {
+            ctx->home.lat = (int32_t)(lat * 1e7);
+            ctx->home.lon = (int32_t)(lon * 1e7);
+            ctx->home.alt = (int32_t)(alt * 1000.0f);
+            ctx->home.valid = true;
+            ctx->home_from_topic = true;
+            if (!ctx->first_pos_set) ctx->first_pos_set = true;
+        }
+    }
+    else if (sub_idx == ctx->sub_attitude) {
         // float[4] q — NED quaternion (w,x,y,z) — direct copy
         int off = ctx->cache.att_q_offset;
         ctx->state.quaternion[0] = ulog_parser_get_float(dmsg, off + 0);
@@ -111,7 +138,7 @@ static void process_message(ulog_replay_ctx_t *ctx, const ulog_data_msg_t *dmsg)
         ctx->last_alt_m = alt;
         ctx->last_pos_usec = dmsg->timestamp;
 
-        if (!ctx->first_pos_set) {
+        if (!ctx->home_from_topic && !ctx->first_pos_set) {
             ctx->home.lat = ctx->state.lat;
             ctx->home.lon = ctx->state.lon;
             ctx->home.alt = ctx->state.alt;
@@ -166,7 +193,7 @@ static void process_message(ulog_replay_ctx_t *ctx, const ulog_data_msg_t *dmsg)
                                 x, y, z,
                                 &ctx->state.lat, &ctx->state.lon, &ctx->state.alt);
 
-                if (!ctx->first_pos_set) {
+                if (!ctx->home_from_topic && !ctx->first_pos_set) {
                     ctx->home.lat = ctx->state.lat;
                     ctx->home.lon = ctx->state.lon;
                     ctx->home.alt = ctx->state.alt;
@@ -217,6 +244,7 @@ int ulog_replay_init(ulog_replay_ctx_t *ctx, const char *filepath) {
     ctx->sub_local_pos = -1;
     ctx->sub_airspeed = -1;
     ctx->sub_vehicle_status = -1;
+    ctx->sub_home_pos = -1;
 
     int ret = ulog_parser_open(&ctx->parser, filepath);
     if (ret != 0) return ret;
@@ -227,6 +255,7 @@ int ulog_replay_init(ulog_replay_ctx_t *ctx, const char *filepath) {
     ctx->sub_local_pos = ulog_parser_find_subscription(&ctx->parser, "vehicle_local_position");
     ctx->sub_airspeed = ulog_parser_find_subscription(&ctx->parser, "airspeed_validated");
     ctx->sub_vehicle_status = ulog_parser_find_subscription(&ctx->parser, "vehicle_status");
+    ctx->sub_home_pos = ulog_parser_find_subscription(&ctx->parser, "home_position");
 
     // Required topics
     if (ctx->sub_attitude < 0) {
@@ -284,48 +313,210 @@ int ulog_replay_init(ulog_replay_ctx_t *ctx, const char *filepath) {
         ctx->cache.vstatus_nav_state_offset = ulog_parser_find_field(&ctx->parser, vs_fmt, "nav_state");
     }
 
-    // Pre-scan for vehicle_type and flight mode transitions
+    // Optional: home_position
+    if (ctx->sub_home_pos >= 0) {
+        int hp_fmt = ctx->parser.subs[ctx->sub_home_pos].format_idx;
+        ctx->cache.home_lat_offset = ulog_parser_find_field(&ctx->parser, hp_fmt, "lat");
+        ctx->cache.home_lon_offset = ulog_parser_find_field(&ctx->parser, hp_fmt, "lon");
+        ctx->cache.home_alt_offset = ulog_parser_find_field(&ctx->parser, hp_fmt, "alt");
+    }
+
+    // Initialize time_offset
+    ctx->time_offset = 0;
+
+    // Pre-scan for vehicle_type, flight mode transitions, and takeoff detection
     ctx->vehicle_type = 2;  // default MAV_TYPE_QUADROTOR
     ctx->current_nav_state = 0xFF;
     ctx->mode_change_count = 0;
-    if (ctx->sub_vehicle_status >= 0) {
+    memset(&ctx->takeoff_anchor, 0, sizeof(ctx->takeoff_anchor));
+    {
         bool got_type = false;
         uint8_t prev_nav = 0xFF;
+
+        // CUSUM state
+        uint16_t vstatus_msg_id = (ctx->sub_vehicle_status >= 0)
+            ? ctx->parser.subs[ctx->sub_vehicle_status].msg_id : 0xFFFF;
+        uint16_t lpos_msg_id = ctx->parser.subs[ctx->sub_local_pos].msg_id;
+
+        // Baseline estimation buffers
+        #define CUSUM_MAX_BASELINE 500
+        float *baseline_buf = (float *)malloc(CUSUM_MAX_BASELINE * sizeof(float));
+        int baseline_count = 0;
+        uint64_t baseline_end = 0;  // set once first lpos seen
+        bool baseline_ready = false;
+        float mu_0 = 0.0f, sigma_0 = 0.0f;
+
+        // CUSUM accumulator
+        float cusum_s = 0.0f;
+        uint64_t cusum_detect_usec = 0;    // when S first exceeded threshold
+        bool cusum_triggered = false;
+        float cusum_threshold = 0.0f;
+        float k_at_onset = 0.0f;
+
+        // Altitude check
+        float first_z = 0.0f;
+        bool got_first_z = false;
+        float min_z_after_detect = 0.0f;  // most negative z (highest altitude) after detection
+
         ulog_data_msg_t scan_msg;
         while (ulog_parser_next(&ctx->parser, &scan_msg)) {
-            if (scan_msg.msg_id != ctx->parser.subs[ctx->sub_vehicle_status].msg_id)
-                continue;
-
-            // Get vehicle type from first message
-            if (!got_type) {
-                uint8_t px4_type = ulog_parser_get_uint8(&scan_msg, ctx->cache.vstatus_type_offset);
-                bool is_vtol = ctx->cache.vstatus_is_vtol_offset >= 0 &&
-                               ulog_parser_get_uint8(&scan_msg, ctx->cache.vstatus_is_vtol_offset);
-                if (is_vtol) {
-                    ctx->vehicle_type = 22;
-                } else {
-                    switch (px4_type) {
-                        case 1: ctx->vehicle_type = 2;  break;
-                        case 2: ctx->vehicle_type = 1;  break;
-                        case 3: ctx->vehicle_type = 10; break;
-                        default: ctx->vehicle_type = 2; break;
+            // Vehicle status processing
+            if (scan_msg.msg_id == vstatus_msg_id && ctx->sub_vehicle_status >= 0) {
+                if (!got_type) {
+                    uint8_t px4_type = ulog_parser_get_uint8(&scan_msg, ctx->cache.vstatus_type_offset);
+                    bool is_vtol = ctx->cache.vstatus_is_vtol_offset >= 0 &&
+                                   ulog_parser_get_uint8(&scan_msg, ctx->cache.vstatus_is_vtol_offset);
+                    if (is_vtol) {
+                        ctx->vehicle_type = 22;
+                    } else {
+                        switch (px4_type) {
+                            case 1: ctx->vehicle_type = 2;  break;
+                            case 2: ctx->vehicle_type = 1;  break;
+                            case 3: ctx->vehicle_type = 10; break;
+                            default: ctx->vehicle_type = 2; break;
+                        }
+                    }
+                    got_type = true;
+                }
+                if (ctx->cache.vstatus_nav_state_offset >= 0) {
+                    uint8_t nav = ulog_parser_get_uint8(&scan_msg, ctx->cache.vstatus_nav_state_offset);
+                    if (nav != prev_nav && ctx->mode_change_count < ULOG_MAX_MODE_CHANGES) {
+                        float t = (float)((double)(scan_msg.timestamp - ctx->parser.start_timestamp) / 1e6);
+                        ctx->mode_changes[ctx->mode_change_count].time_s = t;
+                        ctx->mode_changes[ctx->mode_change_count].nav_state = nav;
+                        ctx->mode_change_count++;
+                        prev_nav = nav;
                     }
                 }
-                got_type = true;
             }
 
-            // Collect nav_state transitions
-            if (ctx->cache.vstatus_nav_state_offset >= 0) {
-                uint8_t nav = ulog_parser_get_uint8(&scan_msg, ctx->cache.vstatus_nav_state_offset);
-                if (nav != prev_nav && ctx->mode_change_count < ULOG_MAX_MODE_CHANGES) {
-                    float t = (float)((double)(scan_msg.timestamp - ctx->parser.start_timestamp) / 1e6);
-                    ctx->mode_changes[ctx->mode_change_count].time_s = t;
-                    ctx->mode_changes[ctx->mode_change_count].nav_state = nav;
-                    ctx->mode_change_count++;
-                    prev_nav = nav;
+            // CUSUM takeoff detection on vehicle_local_position velocity
+            if (scan_msg.msg_id == lpos_msg_id) {
+                float vx = ulog_parser_get_float(&scan_msg, ctx->cache.lpos_vx_offset);
+                float vy = ulog_parser_get_float(&scan_msg, ctx->cache.lpos_vy_offset);
+                float vz = ulog_parser_get_float(&scan_msg, ctx->cache.lpos_vz_offset);
+                float k = sqrtf(vx * vx + vy * vy + vz * vz);
+
+                // Track altitude (z in NED, negative = up)
+                if (!got_first_z) {
+                    first_z = ulog_parser_get_float(&scan_msg, ctx->cache.lpos_z_offset);
+                    got_first_z = true;
+                    min_z_after_detect = first_z;
+                }
+
+                // Stage 1: collect baseline (first 5 seconds)
+                if (!baseline_ready) {
+                    if (baseline_count == 0)
+                        baseline_end = scan_msg.timestamp + NOISE_WINDOW_USEC;
+
+                    if (scan_msg.timestamp < baseline_end && baseline_count < CUSUM_MAX_BASELINE) {
+                        baseline_buf[baseline_count++] = k;
+                    } else if (baseline_count > 0) {
+                        // Compute baseline mean and std
+                        float sum = 0.0f;
+                        for (int i = 0; i < baseline_count; i++) sum += baseline_buf[i];
+                        mu_0 = sum / baseline_count;
+                        float var_sum = 0.0f;
+                        for (int i = 0; i < baseline_count; i++) {
+                            float d = baseline_buf[i] - mu_0;
+                            var_sum += d * d;
+                        }
+                        sigma_0 = sqrtf(var_sum / baseline_count);
+                        if (sigma_0 < 0.001f) sigma_0 = 0.001f;  // avoid division by zero
+                        cusum_threshold = CUSUM_H_FACTOR * sigma_0;
+                        baseline_ready = true;
+                    }
+                }
+
+                // Stage 1: run CUSUM after baseline is established
+                if (baseline_ready && !cusum_triggered) {
+                    cusum_s = cusum_s + k - mu_0 - CUSUM_DELTA / 2.0f;
+                    if (cusum_s < 0.0f) cusum_s = 0.0f;
+
+                    if (cusum_s > cusum_threshold) {
+                        if (cusum_detect_usec == 0) {
+                            cusum_detect_usec = scan_msg.timestamp;
+                            k_at_onset = k;
+                        } else if (scan_msg.timestamp - cusum_detect_usec >= PERSIST_GATE_USEC) {
+                            cusum_triggered = true;
+                        }
+                    } else {
+                        cusum_detect_usec = 0;  // reset if S drops below threshold
+                    }
+                }
+
+                // Track min z after detection for altitude confirmation
+                if (cusum_triggered) {
+                    float z = ulog_parser_get_float(&scan_msg, ctx->cache.lpos_z_offset);
+                    if (z < min_z_after_detect) min_z_after_detect = z;
                 }
             }
         }
+
+        // Finalize takeoff anchor
+        if (cusum_triggered && cusum_detect_usec > 0) {
+            ctx->takeoff_anchor.anchor_usec = cusum_detect_usec;
+            ctx->takeoff_anchor.onset_snr = (k_at_onset - mu_0) / sigma_0;
+
+            // Stage 2: nav_state corroboration
+            ctx->takeoff_anchor.nav_state_corroborated = false;
+            for (int i = 0; i < ctx->mode_change_count; i++) {
+                uint8_t ns = ctx->mode_changes[i].nav_state;
+                if (ns == 17 || ns == 3 || ns == 14 || ns == 4 || ns == 2) {
+                    uint64_t nav_usec = ctx->parser.start_timestamp +
+                        (uint64_t)(ctx->mode_changes[i].time_s * 1e6);
+                    int64_t diff = (int64_t)nav_usec - (int64_t)cusum_detect_usec;
+                    if (diff < 0) diff = -diff;
+                    if ((uint64_t)diff <= NAV_AGREE_WINDOW) {
+                        ctx->takeoff_anchor.nav_state_corroborated = true;
+                        break;
+                    }
+                }
+            }
+
+            // Stage 3: confidence score
+            bool altitude_increased = (min_z_after_detect < first_z - 0.5f);
+            float snr = ctx->takeoff_anchor.onset_snr;
+            float snr_term = snr / 20.0f;
+            if (snr_term > 1.0f) snr_term = 1.0f;
+            float onset_sharp = (k_at_onset - mu_0) / 0.5f;
+            if (onset_sharp > 1.0f) onset_sharp = 1.0f;
+
+            float conf = 0.35f * snr_term
+                       + 0.25f * (ctx->takeoff_anchor.nav_state_corroborated ? 1.0f : 0.0f)
+                       + 0.20f * (sigma_0 < 0.1f ? 1.0f : 0.5f)
+                       + 0.12f * onset_sharp
+                       + 0.08f * (altitude_increased ? 1.0f : 0.0f);
+            if (conf > 1.0f) conf = 1.0f;
+            if (conf < 0.0f) conf = 0.0f;
+            ctx->takeoff_anchor.confidence = conf;
+
+            ctx->takeoff_anchor.method = ctx->takeoff_anchor.nav_state_corroborated ? 2 : 1;
+        } else {
+            // No CUSUM trigger — check for nav_state only
+            bool nav_only = false;
+            uint64_t nav_takeoff_usec = 0;
+            for (int i = 0; i < ctx->mode_change_count; i++) {
+                uint8_t ns = ctx->mode_changes[i].nav_state;
+                if (ns == 17 || ns == 3 || ns == 14 || ns == 4 || ns == 2) {
+                    nav_takeoff_usec = ctx->parser.start_timestamp +
+                        (uint64_t)(ctx->mode_changes[i].time_s * 1e6);
+                    nav_only = true;
+                    break;
+                }
+            }
+            if (nav_only) {
+                ctx->takeoff_anchor.anchor_usec = nav_takeoff_usec;
+                ctx->takeoff_anchor.method = 3;
+                ctx->takeoff_anchor.confidence = 0.25f;
+                ctx->takeoff_anchor.onset_snr = 0.0f;
+                ctx->takeoff_anchor.nav_state_corroborated = true;
+            }
+            // else: method=0, anchor_usec=0, confidence=0 (already zeroed)
+        }
+
+        free(baseline_buf);
+
         if (ctx->mode_change_count > 0)
             ctx->current_nav_state = ctx->mode_changes[0].nav_state;
         ulog_parser_rewind(&ctx->parser);
@@ -344,6 +535,14 @@ int ulog_replay_init(ulog_replay_ctx_t *ctx, const char *filepath) {
     if (ctx->sub_global_pos < 0) printf("  Note: vehicle_global_position not found (using local position)\n");
     if (ctx->sub_airspeed < 0) printf("  Note: airspeed_validated not found (no airspeed data)\n");
     if (ctx->sub_vehicle_status < 0) printf("  Note: vehicle_status not found (defaulting to quadrotor)\n");
+    if (ctx->sub_home_pos < 0) printf("  Note: home_position not found (deriving from first GPS fix)\n");
+
+    printf("Takeoff: t=%.3fs method=%d conf=%.2f snr=%.1f nav=%s\n",
+           ctx->takeoff_anchor.anchor_usec / 1e6,
+           ctx->takeoff_anchor.method,
+           ctx->takeoff_anchor.confidence,
+           ctx->takeoff_anchor.onset_snr,
+           ctx->takeoff_anchor.nav_state_corroborated ? "yes" : "no");
 
     return 0;
 }
@@ -354,7 +553,12 @@ int ulog_replay_init(ulog_replay_ctx_t *ctx, const char *filepath) {
 
 bool ulog_replay_advance(ulog_replay_ctx_t *ctx, float dt, float speed, bool looping, bool interpolation) {
     ctx->wall_accum += (double)dt * speed;
-    uint64_t target = ctx->parser.start_timestamp + (uint64_t)(ctx->wall_accum * 1e6);
+    int64_t raw_target = (int64_t)ctx->parser.start_timestamp
+                       + (int64_t)(ctx->wall_accum * 1e6)
+                       - ctx->time_offset;
+    uint64_t target = (raw_target > (int64_t)ctx->parser.start_timestamp)
+                    ? (uint64_t)raw_target
+                    : ctx->parser.start_timestamp;
 
     // Clamp to end
     if (target > ctx->parser.end_timestamp) {
@@ -461,6 +665,23 @@ void ulog_replay_seek(ulog_replay_ctx_t *ctx, float target_s) {
         process_message(ctx, &dmsg);
         if (dmsg.timestamp >= target_usec) break;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Takeoff detection accessor
+// ---------------------------------------------------------------------------
+
+takeoff_anchor_t ulog_replay_detect_takeoff(const ulog_replay_ctx_t *ctx) {
+    return ctx->takeoff_anchor;
+}
+
+// ---------------------------------------------------------------------------
+// Aligned duration for multi-vehicle sync
+// ---------------------------------------------------------------------------
+
+float ulog_replay_aligned_duration(const ulog_replay_ctx_t *ctx) {
+    float dur = (float)((double)(ctx->parser.end_timestamp - ctx->parser.start_timestamp) / 1e6);
+    return dur + (float)(ctx->time_offset / 1e6);
 }
 
 // ---------------------------------------------------------------------------
