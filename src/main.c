@@ -252,7 +252,7 @@ int main(int argc, char *argv[]) {
                     double dalt_m = (double)(sources[i].home.alt - sources[j].home.alt) / 1000.0;
                     double dist = sqrt(dlat_m * dlat_m + dlon_m * dlon_m + dalt_m * dalt_m);
                     if (dist < 0.1) conflict = true;              // identical position
-                    if (dist > 1000.0) { conflict = true; conflict_far = true; }  // too far
+                    if (dist > 500.0) { conflict = true; conflict_far = true; }  // too far
                 }
             }
         }
@@ -393,29 +393,10 @@ int main(int argc, char *argv[]) {
     }
 
     // Apply grid offset for deconfliction
-    if (ghost_mode_grid && num_replay_files > 1) {
-        if (conflict_far) {
-            // Narrow grid: compute position delta using same math as vehicle_update
-            double ref_lat_rad = (sources[0].home.lat / 1e7) * (M_PI / 180.0);
-            double ref_lon_rad = (sources[0].home.lon / 1e7) * (M_PI / 180.0);
-            double ref_alt_m = sources[0].home.alt / 1000.0;
-            for (int i = 1; i < num_replay_files; i++) {
-                if (!sources[i].home.valid) continue;
-                double sec_lat_rad = (sources[i].home.lat / 1e7) * (M_PI / 180.0);
-                double sec_lon_rad = (sources[i].home.lon / 1e7) * (M_PI / 180.0);
-                double jmav_x = 6371000.0 * (sec_lat_rad - ref_lat_rad);
-                double jmav_y = 6371000.0 * (sec_lon_rad - ref_lon_rad) * cos(ref_lat_rad);
-                vehicles[i].grid_offset = (Vector3){
-                    (float)(-jmav_y + i * 1.0),
-                    0.0f,
-                    (float)(jmav_x)
-                };
-            }
-        } else {
-            // Normal grid offset: 5m per drone
-            for (int i = 1; i < num_replay_files; i++)
-                vehicles[i].grid_offset = (Vector3){ i * 5.0f, 0.0f, 0.0f };
-        }
+    // Normal grid: set immediately. Narrow grid (too far): handled at runtime.
+    if (ghost_mode_grid && !conflict_far && num_replay_files > 1) {
+        for (int i = 1; i < num_replay_files; i++)
+            vehicles[i].grid_offset = (Vector3){ i * 5.0f, 0.0f, 0.0f };
     }
 
     hud_t hud;
@@ -475,8 +456,19 @@ int main(int argc, char *argv[]) {
             for (int i = 1; i < num_replay_files; i++) {
                 if (vehicles[i].active && vehicles[i].grid_offset.x == 0.0f
                     && vehicles[i].grid_offset.z == 0.0f) {
-                    // First frame both are active — snap secondary to primary
                     vehicles[i].grid_offset.x = vehicles[0].position.x - vehicles[i].position.x;
+                    vehicles[i].grid_offset.y = vehicles[0].position.y - vehicles[i].position.y;
+                    vehicles[i].grid_offset.z = vehicles[0].position.z - vehicles[i].position.z;
+                }
+            }
+        }
+
+        // Narrow grid: same runtime snap as ghost but with 1m spacing per drone
+        if (ghost_mode_grid && conflict_far && num_replay_files > 1 && vehicles[0].active) {
+            for (int i = 1; i < num_replay_files; i++) {
+                if (vehicles[i].active && vehicles[i].grid_offset.x == 0.0f
+                    && vehicles[i].grid_offset.z == 0.0f) {
+                    vehicles[i].grid_offset.x = vehicles[0].position.x - vehicles[i].position.x + i * 1.0f;
                     vehicles[i].grid_offset.y = vehicles[0].position.y - vehicles[i].position.y;
                     vehicles[i].grid_offset.z = vehicles[0].position.z - vehicles[i].position.z;
                 }
