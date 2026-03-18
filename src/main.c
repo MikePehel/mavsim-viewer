@@ -611,12 +611,19 @@ int main(int argc, char *argv[]) {
             }
             if (ch == 1) {
                 if (conflict_detected) {
-                    // Cancel — reset to ghost (safe default for conflicts)
+                    // Cancel — reset each drone to own origin
                     ghost_mode = false; ghost_mode_grid = false;
                     for (int i = 0; i < num_replay_files; i++) {
                         vehicles[i].grid_offset = (Vector3){0,0,0};
                         vehicle_set_ghost_alpha(&vehicles[i], 1.0f);
-                        vehicles[i].origin_set = false;
+                        if (sources[i].home.valid) {
+                            vehicles[i].lat0 = sources[i].home.lat * 1e-7 * (M_PI / 180.0);
+                            vehicles[i].lon0 = sources[i].home.lon * 1e-7 * (M_PI / 180.0);
+                            vehicles[i].alt0 = sources[i].home.alt * 1e-3;
+                            vehicles[i].origin_set = true;
+                        }
+                        vehicles[i].origin_wait_count = 0;
+                        vehicle_reset_trail(&vehicles[i]);
                     }
                 } else {
                     // Formation mode — shared origin, real relative positions
@@ -630,6 +637,8 @@ int main(int argc, char *argv[]) {
                             vehicles[i].alt0 = min_alt;
                             vehicles[i].origin_set = true;
                         }
+                        vehicles[i].origin_wait_count = 0;
+                        vehicle_reset_trail(&vehicles[i]);
                     }
                 }
             } else if (ch == 2) {
@@ -637,7 +646,14 @@ int main(int argc, char *argv[]) {
                 ghost_mode = true; ghost_mode_grid = false;
                 for (int i = 0; i < num_replay_files; i++) {
                     vehicles[i].grid_offset = (Vector3){0,0,0};
-                    vehicles[i].origin_set = false;
+                    if (sources[i].home.valid) {
+                        vehicles[i].lat0 = sources[i].home.lat * 1e-7 * (M_PI / 180.0);
+                        vehicles[i].lon0 = sources[i].home.lon * 1e-7 * (M_PI / 180.0);
+                        vehicles[i].alt0 = sources[i].home.alt * 1e-3;
+                        vehicles[i].origin_set = true;
+                    }
+                    vehicles[i].origin_wait_count = 0;
+                    vehicle_reset_trail(&vehicles[i]);
                 }
                 vehicle_set_ghost_alpha(&vehicles[0], 1.0f);
                 for (int i = 1; i < num_replay_files; i++)
@@ -648,7 +664,14 @@ int main(int argc, char *argv[]) {
                     ghost_mode = false; ghost_mode_grid = true;
                     for (int i = 0; i < num_replay_files; i++) {
                         vehicle_set_ghost_alpha(&vehicles[i], 1.0f);
-                        vehicles[i].origin_set = false;
+                        if (sources[i].home.valid) {
+                            vehicles[i].lat0 = sources[i].home.lat * 1e-7 * (M_PI / 180.0);
+                            vehicles[i].lon0 = sources[i].home.lon * 1e-7 * (M_PI / 180.0);
+                            vehicles[i].alt0 = sources[i].home.alt * 1e-3;
+                            vehicles[i].origin_set = true;
+                        }
+                        vehicles[i].origin_wait_count = 0;
+                        vehicle_reset_trail(&vehicles[i]);
                         vehicles[i].grid_offset = (i > 0) ? (Vector3){ i * 5.0f, 0.0f, 0.0f } : (Vector3){0,0,0};
                     }
                 } else {
@@ -656,7 +679,14 @@ int main(int argc, char *argv[]) {
                     ghost_mode = false; ghost_mode_grid = true;
                     for (int i = 0; i < num_replay_files; i++) {
                         vehicle_set_ghost_alpha(&vehicles[i], 1.0f);
-                        vehicles[i].origin_set = false;
+                        if (sources[i].home.valid) {
+                            vehicles[i].lat0 = sources[i].home.lat * 1e-7 * (M_PI / 180.0);
+                            vehicles[i].lon0 = sources[i].home.lon * 1e-7 * (M_PI / 180.0);
+                            vehicles[i].alt0 = sources[i].home.alt * 1e-3;
+                            vehicles[i].origin_set = true;
+                        }
+                        vehicles[i].origin_wait_count = 0;
+                        vehicle_reset_trail(&vehicles[i]);
                         vehicles[i].grid_offset = (i > 0) ? (Vector3){ i * 5.0f, 0.0f, 0.0f } : (Vector3){0,0,0};
                     }
                 }
