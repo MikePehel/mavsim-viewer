@@ -22,6 +22,7 @@
 #include "asset_path.h"
 
 #define MAX_VEHICLES 16
+#define EARTH_RADIUS 6371000.0
 
 // Incremental Pearson correlation (position only: x, y, z)
 #define CORR_CHANNELS 3
@@ -1081,6 +1082,29 @@ int main(int argc, char *argv[]) {
                         vehicle_draw(&vehicles[i], scene.view_mode, i == selected,
                                      tm_3d, show_ground_track, scene.camera.position,
                                      classic_colors);
+                    }
+                }
+
+                // Home position markers (formation mode only)
+                if (num_replay_files > 1 && !ghost_mode && !ghost_mode_grid) {
+                    for (int i = 0; i < vehicle_count; i++) {
+                        if (!sources[i].home.valid) continue;
+                        double lat = sources[i].home.lat * 1e-7 * (M_PI / 180.0);
+                        double lon = sources[i].home.lon * 1e-7 * (M_PI / 180.0);
+                        double alt = sources[i].home.alt * 1e-3;
+                        float hx = (float)(EARTH_RADIUS * (lon - ref_lon_rad) * cos(ref_lat_rad)) + vehicles[i].grid_offset.x;
+                        float hy = (float)(alt - min_alt) + 0.02f;
+                        float hz = (float)(-(EARTH_RADIUS * (lat - ref_lat_rad))) + vehicles[i].grid_offset.z;
+                        float half = 0.333f;
+                        Color fill = vehicles[i].color;
+                        fill.a = 70;
+                        Color border = vehicles[i].color;
+                        border.a = 180;
+                        DrawPlane((Vector3){hx, hy, hz}, (Vector2){half * 2, half * 2}, fill);
+                        DrawLine3D((Vector3){hx - half, hy, hz - half}, (Vector3){hx + half, hy, hz - half}, border);
+                        DrawLine3D((Vector3){hx + half, hy, hz - half}, (Vector3){hx + half, hy, hz + half}, border);
+                        DrawLine3D((Vector3){hx + half, hy, hz + half}, (Vector3){hx - half, hy, hz + half}, border);
+                        DrawLine3D((Vector3){hx - half, hy, hz + half}, (Vector3){hx - half, hy, hz - half}, border);
                     }
                 }
 
