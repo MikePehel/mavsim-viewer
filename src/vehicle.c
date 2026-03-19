@@ -895,8 +895,8 @@ void vehicle_draw_correlation_curtain(
         Vector3 pb1 = vb->trail[idx_b1];
 
         float t = (float)i / (float)n;
-        unsigned char alpha_a = (unsigned char)(t * 160 * va->ghost_alpha);
-        unsigned char alpha_b = (unsigned char)(t * 160 * vb->ghost_alpha);
+        unsigned char alpha_a = (unsigned char)(t * 255 * va->ghost_alpha);
+        unsigned char alpha_b = (unsigned char)(t * 255 * vb->ghost_alpha);
 
         // Front face: pa0 → pb0 → pa1, then pb0 → pb1 → pa1
         rlColor4ub(ca.r, ca.g, ca.b, alpha_a);

@@ -514,6 +514,8 @@ int main(int argc, char *argv[]) {
     bool show_ground_track = false;  // ground projection off by default
     bool classic_colors = false;     // L key: toggle classic (red/blue) vs modern (yellow/purple)
     int corr_mode = 0;               // Shift+T: 0=off, 1=ribbon, 2=line
+    bool show_corr_labels = true;    // Ctrl+L: distance labels in ortho correlation
+    bool show_axes = false;          // Z: axis orientation gizmo
 
     // Main loop
     while (!WindowShouldClose()) {
@@ -841,6 +843,17 @@ int main(int argc, char *argv[]) {
             dbg_panel.visible = !dbg_panel.visible;
         }
 
+        // Toggle correlation distance labels (Ctrl+L)
+        if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_L)) {
+            show_corr_labels = !show_corr_labels;
+        }
+
+        // Toggle axis gizmo (Z)
+        if (IsKeyPressed(KEY_Z) && !IsKeyDown(KEY_LEFT_SHIFT) && !IsKeyDown(KEY_RIGHT_SHIFT)
+            && !IsKeyDown(KEY_LEFT_CONTROL) && !IsKeyDown(KEY_RIGHT_CONTROL)) {
+            show_axes = !show_axes;
+        }
+
         // Toggle ortho panel
         if (IsKeyPressed(KEY_O)) {
             ortho.visible = !ortho.visible;
@@ -1046,8 +1059,8 @@ int main(int argc, char *argv[]) {
         // Render ortho views to textures (before main BeginDrawing)
         if (ortho.visible) {
             ortho_panel_update(&ortho, vehicles[selected].position);
-            ortho_panel_render(&ortho, &scene, vehicles, vehicle_count,
-                               selected, scene.view_mode, trail_mode,
+            ortho_panel_render(&ortho, vehicles, vehicle_count,
+                               selected, scene.view_mode,
                                corr_mode, hud.pinned, hud.pinned_count);
         }
 
@@ -1057,26 +1070,40 @@ int main(int argc, char *argv[]) {
             // Sky background
             scene_draw_sky(&scene);
 
+            // Fullscreen ortho: suppress 3D trails, conditionally suppress 3D correlation line
+            bool fs_ortho = (scene.ortho_mode != ORTHO_NONE);
+            int tm_3d = fs_ortho ? 0 : trail_mode;
+
             BeginMode3D(scene.camera);
                 scene_draw(&scene);
                 for (int i = 0; i < vehicle_count; i++) {
                     if (vehicles[i].active || vehicle_count == 1) {
                         vehicle_draw(&vehicles[i], scene.view_mode, i == selected,
-                                     trail_mode, show_ground_track, scene.camera.position,
+                                     tm_3d, show_ground_track, scene.camera.position,
                                      classic_colors);
                     }
                 }
 
-                // Correlation overlay: ribbon (mode 1) or line (mode 2)
+                // Axis gizmo at selected drone (Z key toggle)
+                if (show_axes && vehicles[selected].active) {
+                    Vector3 com = vehicles[selected].position;
+                    com.y += vehicles[selected].model_scale * 0.15f;
+                    draw_axis_gizmo_3d(com, vehicles[selected].model_scale * 0.5f,
+                                        vehicles[selected].rotation);
+                }
+
+                // Correlation overlay: line (mode 1) or curtain (mode 2)
+                // In fullscreen ortho, skip corr_mode==1 (line) — drawn in 2D instead.
+                // Curtain (corr_mode==2) always stays in 3D.
                 if (corr_mode > 0 && hud.pinned_count > 0) {
                     for (int p = 0; p < hud.pinned_count; p++) {
                         int pidx = hud.pinned[p];
                         if (pidx >= 0 && pidx < vehicle_count && vehicles[pidx].active
                             && pidx != selected) {
-                            if (corr_mode == 1) {
+                            if (corr_mode == 1 && !fs_ortho) {
                                 vehicle_draw_correlation_line(
                                     &vehicles[selected], &vehicles[pidx]);
-                            } else {
+                            } else if (corr_mode == 2) {
                                 vehicle_draw_correlation_curtain(
                                     &vehicles[selected], &vehicles[pidx],
                                     scene.view_mode, scene.camera.position);
@@ -1088,6 +1115,13 @@ int main(int argc, char *argv[]) {
 
             // Ortho ground fill (2D overlay)
             scene_draw_ortho_ground(&scene, GetScreenWidth(), GetScreenHeight());
+
+            // Fullscreen ortho 2D overlays (trails + correlation line)
+            ortho_draw_fullscreen_2d(&scene, vehicles, vehicle_count,
+                                      selected, trail_mode,
+                                      corr_mode, hud.pinned, hud.pinned_count,
+                                      GetScreenWidth(), GetScreenHeight(),
+                                      hud.font_label, show_corr_labels);
 
             // HUD
             if (show_hud) {
@@ -1115,11 +1149,15 @@ int main(int argc, char *argv[]) {
 
             // Ortho panel overlay
             int bar_h = show_hud ? hud_bar_height(&hud, GetScreenHeight()) : 0;
-            ortho_panel_draw(&ortho, GetScreenHeight(), bar_h, scene.view_mode, hud.font_label);
+            ortho_panel_draw(&ortho, GetScreenHeight(), bar_h, scene.view_mode, hud.font_label,
+                             vehicles, vehicle_count, selected, trail_mode,
+                             corr_mode, hud.pinned, hud.pinned_count,
+                             show_axes);
 
             // Fullscreen ortho view label
             ortho_panel_draw_fullscreen_label(GetScreenWidth(), GetScreenHeight(),
-                scene.ortho_mode, scene.ortho_span, scene.view_mode, hud.font_label);
+                scene.ortho_mode, scene.ortho_span, scene.view_mode, hud.font_label,
+                show_axes);
 
         EndDrawing();
     }
