@@ -513,7 +513,7 @@ int main(int argc, char *argv[]) {
     int trail_mode = 1;              // 0=off, 1=directional trail, 2=speed ribbon
     bool show_ground_track = false;  // ground projection off by default
     bool classic_colors = false;     // L key: toggle classic (red/blue) vs modern (yellow/purple)
-    bool corr_ribbon = false;        // Shift+T: correlation ribbon overlay
+    int corr_mode = 0;               // Shift+T: 0=off, 1=ribbon, 2=line
 
     // Main loop
     while (!WindowShouldClose()) {
@@ -811,16 +811,19 @@ int main(int argc, char *argv[]) {
             show_hud = !show_hud;
         }
 
-        // Shift+T: toggle correlation ribbon overlay (multi-file replay only)
+        // Shift+T: cycle correlation overlay (off → ribbon → line → off)
         if (IsKeyPressed(KEY_T) && (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT))
             && is_replay && num_replay_files > 1) {
-            corr_ribbon = !corr_ribbon;
-            hud_toast(&hud, corr_ribbon ? "Correlation Ribbon On" : "Correlation Ribbon Off", 2.0f);
+            corr_mode = (corr_mode + 1) % 3;
+            const char *names[] = { "Correlation Off", "Correlation Line", "Correlation Curtain" };
+            hud_toast(&hud, names[corr_mode], 2.0f);
         }
         // Cycle trail mode: off → trail → speed ribbon
         else if (IsKeyPressed(KEY_T)) {
             int max_modes = (num_replay_files > 1) ? 4 : 3;
             trail_mode = (trail_mode + 1) % max_modes;
+            const char *trail_names[] = { "Trails Off", "Direction Trails", "Speed Ribbons", "ID Trails" };
+            hud_toast(&hud, trail_names[trail_mode], 2.0f);
         }
 
         // Toggle classic/modern arm colors
@@ -906,7 +909,8 @@ int main(int argc, char *argv[]) {
                         } else if (hud.pinned_count < HUD_MAX_PINNED && hud.pinned_count < vehicle_count - 1) {
                             hud.pinned[hud.pinned_count++] = idx;
                         }
-                    } else if (!IsKeyDown(KEY_LEFT_CONTROL) && !IsKeyDown(KEY_RIGHT_CONTROL)) {
+                    } else if (!IsKeyDown(KEY_LEFT_CONTROL) && !IsKeyDown(KEY_RIGHT_CONTROL)
+                               && !IsKeyDown(KEY_LEFT_ALT) && !IsKeyDown(KEY_RIGHT_ALT)) {
                         // Plain number: switch primary, clear pins
                         selected = idx;
                         hud.pinned_count = 0;
@@ -1043,7 +1047,8 @@ int main(int argc, char *argv[]) {
         if (ortho.visible) {
             ortho_panel_update(&ortho, vehicles[selected].position);
             ortho_panel_render(&ortho, &scene, vehicles, vehicle_count,
-                               selected, scene.view_mode, trail_mode);
+                               selected, scene.view_mode, trail_mode,
+                               corr_mode, hud.pinned, hud.pinned_count);
         }
 
         // Render
@@ -1062,15 +1067,20 @@ int main(int argc, char *argv[]) {
                     }
                 }
 
-                // Correlation ribbon: between selected and each pinned drone
-                if (corr_ribbon && hud.pinned_count > 0) {
+                // Correlation overlay: ribbon (mode 1) or line (mode 2)
+                if (corr_mode > 0 && hud.pinned_count > 0) {
                     for (int p = 0; p < hud.pinned_count; p++) {
                         int pidx = hud.pinned[p];
                         if (pidx >= 0 && pidx < vehicle_count && vehicles[pidx].active
                             && pidx != selected) {
-                            vehicle_draw_correlation_ribbon(
-                                &vehicles[selected], &vehicles[pidx],
-                                scene.view_mode, scene.camera.position);
+                            if (corr_mode == 1) {
+                                vehicle_draw_correlation_line(
+                                    &vehicles[selected], &vehicles[pidx]);
+                            } else {
+                                vehicle_draw_correlation_curtain(
+                                    &vehicles[selected], &vehicles[pidx],
+                                    scene.view_mode, scene.camera.position);
+                            }
                         }
                     }
                 }

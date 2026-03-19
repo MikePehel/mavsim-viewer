@@ -56,14 +56,43 @@ void ortho_panel_update(ortho_panel_t *op, Vector3 pos) {
 void ortho_panel_render(ortho_panel_t *op, const scene_t *s,
                         const vehicle_t *vehicles, int vehicle_count,
                         int selected, view_mode_t view_mode,
-                        int trail_mode)
+                        int trail_mode,
+                        int corr_mode, const int *pinned, int pinned_count)
 {
+    // Per-view-mode colors for ortho sidebar
+    Color bg_col, gnd_col, grid_minor, grid_major;
+    switch (view_mode) {
+        case VIEW_REZ:
+            bg_col     = (Color){ 10,  10,  18, 255 };
+            gnd_col    = (Color){  2,   2,   4, 240 };
+            grid_minor = (Color){  0, 204, 218,  80 };
+            grid_major = (Color){  0, 204, 218, 190 };
+            break;
+        case VIEW_1988:
+            bg_col     = (Color){ 10,  10,  18, 255 };
+            gnd_col    = (Color){  5,   5,  16, 240 };
+            grid_minor = (Color){ 255, 20, 100,  80 };
+            grid_major = (Color){ 255, 20, 100, 200 };
+            break;
+        case VIEW_SNOW:
+            bg_col     = (Color){ 240, 242, 245, 255 };
+            gnd_col    = (Color){ 210, 212, 216, 240 };
+            grid_minor = (Color){ 140, 145, 155, 180 };
+            grid_major = (Color){  50,  55,  65, 230 };
+            break;
+        default: // VIEW_GRID
+            bg_col     = (Color){ 10,  10,  18, 255 };
+            gnd_col    = (Color){  6,   6,  12, 240 };
+            grid_minor = (Color){ 115, 115, 120, 200 };
+            grid_major = (Color){ 175, 175, 180, 240 };
+            break;
+    }
+
     for (int v = 0; v < ORTHO_VIEW_COUNT; v++) {
         BeginTextureMode(op->targets[v]);
-            ClearBackground((Color){ 10, 10, 18, 255 });
+            ClearBackground(bg_col);
             BeginMode3D(op->cameras[v]);
-                scene_draw(s);
-
+                rlSetLineWidth(1.5f);
                 float ext = op->ortho_span * 2.0f;
                 // Pick grid spacing based on span
                 float spacing = 10.0f;
@@ -71,66 +100,66 @@ void ortho_panel_render(ortho_panel_t *op, const scene_t *s,
                 else if (op->ortho_span > 80.0f) spacing = 20.0f;
                 else if (op->ortho_span < 20.0f) spacing = 2.0f;
 
-                Color grid_minor = { 40, 40, 55, 60 };
-                Color grid_major = { 60, 60, 80, 100 };
-
                 Vector3 center = op->cameras[v].target;
 
+                // Grid lines anchored to world origin
+                float sh, sv;  // start values for horizontal/vertical axes
                 if (v == 0) {
                     // Top-down: XZ grid
-                    float snap_x = floorf(center.x / spacing) * spacing;
-                    float snap_z = floorf(center.z / spacing) * spacing;
-                    for (float g = -ext; g <= ext; g += spacing) {
-                        bool major = fabsf(fmodf(snap_x + g, spacing * 5)) < 0.1f;
+                    sh = floorf((center.x - ext) / spacing) * spacing;
+                    sv = floorf((center.z - ext) / spacing) * spacing;
+                    for (float x = sh; x <= center.x + ext; x += spacing) {
+                        bool major = fabsf(fmodf(x, spacing * 5)) < 0.1f;
                         Color c = major ? grid_major : grid_minor;
-                        DrawLine3D((Vector3){snap_x + g, 0.01f, center.z - ext},
-                                   (Vector3){snap_x + g, 0.01f, center.z + ext}, c);
+                        DrawLine3D((Vector3){x, 0.01f, center.z - ext},
+                                   (Vector3){x, 0.01f, center.z + ext}, c);
                     }
-                    for (float g = -ext; g <= ext; g += spacing) {
-                        bool major = fabsf(fmodf(snap_z + g, spacing * 5)) < 0.1f;
+                    for (float z = sv; z <= center.z + ext; z += spacing) {
+                        bool major = fabsf(fmodf(z, spacing * 5)) < 0.1f;
                         Color c = major ? grid_major : grid_minor;
-                        DrawLine3D((Vector3){center.x - ext, 0.01f, snap_z + g},
-                                   (Vector3){center.x + ext, 0.01f, snap_z + g}, c);
+                        DrawLine3D((Vector3){center.x - ext, 0.01f, z},
+                                   (Vector3){center.x + ext, 0.01f, z}, c);
                     }
                 } else if (v == 1) {
                     // Front: XY grid (constant Z)
-                    float snap_x = floorf(center.x / spacing) * spacing;
-                    float snap_y = floorf(center.y / spacing) * spacing;
                     float z = center.z;
-                    for (float g = -ext; g <= ext; g += spacing) {
-                        bool major = fabsf(fmodf(snap_x + g, spacing * 5)) < 0.1f;
+                    sh = floorf((center.x - ext) / spacing) * spacing;
+                    sv = floorf((center.y - ext) / spacing) * spacing;
+                    for (float x = sh; x <= center.x + ext; x += spacing) {
+                        bool major = fabsf(fmodf(x, spacing * 5)) < 0.1f;
                         Color c = major ? grid_major : grid_minor;
-                        DrawLine3D((Vector3){snap_x + g, center.y - ext, z},
-                                   (Vector3){snap_x + g, center.y + ext, z}, c);
+                        DrawLine3D((Vector3){x, center.y - ext, z},
+                                   (Vector3){x, center.y + ext, z}, c);
                     }
-                    for (float g = -ext; g <= ext; g += spacing) {
-                        bool major = fabsf(fmodf(snap_y + g, spacing * 5)) < 0.1f;
+                    for (float y = sv; y <= center.y + ext; y += spacing) {
+                        bool major = fabsf(fmodf(y, spacing * 5)) < 0.1f;
                         Color c = major ? grid_major : grid_minor;
-                        DrawLine3D((Vector3){center.x - ext, snap_y + g, z},
-                                   (Vector3){center.x + ext, snap_y + g, z}, c);
+                        DrawLine3D((Vector3){center.x - ext, y, z},
+                                   (Vector3){center.x + ext, y, z}, c);
                     }
                 } else {
                     // Side (Right): ZY grid (constant X)
-                    float snap_z = floorf(center.z / spacing) * spacing;
-                    float snap_y = floorf(center.y / spacing) * spacing;
                     float x = center.x;
-                    for (float g = -ext; g <= ext; g += spacing) {
-                        bool major = fabsf(fmodf(snap_z + g, spacing * 5)) < 0.1f;
+                    sh = floorf((center.z - ext) / spacing) * spacing;
+                    sv = floorf((center.y - ext) / spacing) * spacing;
+                    for (float z = sh; z <= center.z + ext; z += spacing) {
+                        bool major = fabsf(fmodf(z, spacing * 5)) < 0.1f;
                         Color c = major ? grid_major : grid_minor;
-                        DrawLine3D((Vector3){x, center.y - ext, snap_z + g},
-                                   (Vector3){x, center.y + ext, snap_z + g}, c);
+                        DrawLine3D((Vector3){x, center.y - ext, z},
+                                   (Vector3){x, center.y + ext, z}, c);
                     }
-                    for (float g = -ext; g <= ext; g += spacing) {
-                        bool major = fabsf(fmodf(snap_y + g, spacing * 5)) < 0.1f;
+                    for (float y = sv; y <= center.y + ext; y += spacing) {
+                        bool major = fabsf(fmodf(y, spacing * 5)) < 0.1f;
                         Color c = major ? grid_major : grid_minor;
-                        DrawLine3D((Vector3){x, snap_y + g, center.z - ext},
-                                   (Vector3){x, snap_y + g, center.z + ext}, c);
+                        DrawLine3D((Vector3){x, y, center.z - ext},
+                                   (Vector3){x, y, center.z + ext}, c);
                     }
                 }
 
                 // Ground line at Y=0 (side/front views)
                 if (v > 0) {
-                    Color gnd_line = { 120, 120, 150, 200 };
+                    Color gnd_line = grid_major;
+                    gnd_line.a = 220;
                     DrawLine3D((Vector3){-ext, 0, -ext}, (Vector3){ ext, 0, -ext}, gnd_line);
                     DrawLine3D((Vector3){-ext, 0,  ext}, (Vector3){ ext, 0,  ext}, gnd_line);
                     DrawLine3D((Vector3){-ext, 0, -ext}, (Vector3){-ext, 0,  ext}, gnd_line);
@@ -143,6 +172,23 @@ void ortho_panel_render(ortho_panel_t *op, const scene_t *s,
                                      trail_mode, false, op->cameras[v].position, false);
                     }
                 }
+
+                if (corr_mode > 0 && pinned_count > 0) {
+                    for (int p = 0; p < pinned_count; p++) {
+                        int pidx = pinned[p];
+                        if (pidx >= 0 && pidx < vehicle_count && vehicles[pidx].active
+                            && pidx != selected) {
+                            if (corr_mode == 1) {
+                                vehicle_draw_correlation_line(
+                                    &vehicles[selected], &vehicles[pidx]);
+                            } else {
+                                vehicle_draw_correlation_curtain(
+                                    &vehicles[selected], &vehicles[pidx],
+                                    view_mode, op->cameras[v].position);
+                            }
+                        }
+                    }
+                }
             EndMode3D();
 
             // 2D ground fill below Y=0 for side/front views
@@ -153,7 +199,7 @@ void ortho_panel_render(ortho_panel_t *op, const scene_t *s,
                 int gy = (int)sp.y;
                 if (gy < 0) gy = 0;
                 if (gy + 1 < ORTHO_TEX_SIZE) {
-                    DrawRectangle(0, gy + 1, ORTHO_TEX_SIZE, ORTHO_TEX_SIZE - gy - 1, (Color){ 2, 2, 6, 180 });
+                    DrawRectangle(0, gy + 1, ORTHO_TEX_SIZE, ORTHO_TEX_SIZE - gy - 1, gnd_col);
                 }
             }
         EndTextureMode();

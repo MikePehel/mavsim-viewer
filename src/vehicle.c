@@ -866,7 +866,7 @@ void vehicle_set_ghost_alpha(vehicle_t *v, float alpha) {
     v->ghost_alpha = alpha;
 }
 
-void vehicle_draw_correlation_ribbon(
+void vehicle_draw_correlation_curtain(
     const vehicle_t *va, const vehicle_t *vb,
     view_mode_t view_mode, Vector3 cam_pos) {
     if (va->trail_count < 2 || vb->trail_count < 2) return;
@@ -928,6 +928,102 @@ void vehicle_draw_correlation_ribbon(
     }
     rlEnd();
     rlEnableDepthMask();
+}
+
+void vehicle_draw_correlation_line(
+    const vehicle_t *va, const vehicle_t *vb) {
+    // Offset to model center of mass (model origin is at bottom)
+    float off_a = va->model_scale * 0.15f;
+    float off_b = vb->model_scale * 0.15f;
+    Vector3 pa = { va->position.x, va->position.y + off_a, va->position.z };
+    Vector3 pb = { vb->position.x, vb->position.y + off_b, vb->position.z };
+
+    Vector3 seg = { pb.x - pa.x, pb.y - pa.y, pb.z - pa.z };
+    float seg_len = sqrtf(seg.x*seg.x + seg.y*seg.y + seg.z*seg.z);
+    if (seg_len < 0.001f) return;
+
+    Vector3 dir = { seg.x/seg_len, seg.y/seg_len, seg.z/seg_len };
+
+    // Build two perpendicular vectors to form the cylinder cross-section
+    Vector3 perp1, perp2;
+    if (fabsf(dir.y) < 0.9f) {
+        Vector3 up = {0, 1, 0};
+        perp1 = (Vector3){ dir.y*up.z - dir.z*up.y,
+                           dir.z*up.x - dir.x*up.z,
+                           dir.x*up.y - dir.y*up.x };
+    } else {
+        Vector3 right = {1, 0, 0};
+        perp1 = (Vector3){ dir.y*right.z - dir.z*right.y,
+                           dir.z*right.x - dir.x*right.z,
+                           dir.x*right.y - dir.y*right.x };
+    }
+    float p1len = sqrtf(perp1.x*perp1.x + perp1.y*perp1.y + perp1.z*perp1.z);
+    perp1.x /= p1len; perp1.y /= p1len; perp1.z /= p1len;
+    perp2 = (Vector3){ dir.y*perp1.z - dir.z*perp1.y,
+                       dir.z*perp1.x - dir.x*perp1.z,
+                       dir.x*perp1.y - dir.y*perp1.x };
+
+    Color ca = va->color;
+    Color cb = vb->color;
+    unsigned char alpha_a = (unsigned char)(220 * va->ghost_alpha);
+    unsigned char alpha_b = (unsigned char)(220 * vb->ghost_alpha);
+    float radius = 0.04f;
+    int slices = 8;
+    int rings = 6;
+
+    // Precompute sin/cos for the circle
+    float sin_t[9], cos_t[9];  // slices + 1
+    for (int s = 0; s <= slices; s++) {
+        float a = (float)s / slices * 2.0f * M_PI;
+        sin_t[s] = sinf(a);
+        cos_t[s] = cosf(a);
+    }
+
+    rlBegin(RL_TRIANGLES);
+    for (int r = 0; r < rings; r++) {
+        float t0 = (float)r / rings;
+        float t1 = (float)(r + 1) / rings;
+
+        // Interpolated positions along axis
+        Vector3 c0 = { pa.x + seg.x*t0, pa.y + seg.y*t0, pa.z + seg.z*t0 };
+        Vector3 c1 = { pa.x + seg.x*t1, pa.y + seg.y*t1, pa.z + seg.z*t1 };
+
+        // Interpolated colors
+        unsigned char r0 = (unsigned char)(ca.r + (cb.r - ca.r) * t0);
+        unsigned char g0 = (unsigned char)(ca.g + (cb.g - ca.g) * t0);
+        unsigned char b0 = (unsigned char)(ca.b + (cb.b - ca.b) * t0);
+        unsigned char a0 = (unsigned char)(alpha_a + (alpha_b - alpha_a) * t0);
+        unsigned char r1 = (unsigned char)(ca.r + (cb.r - ca.r) * t1);
+        unsigned char g1 = (unsigned char)(ca.g + (cb.g - ca.g) * t1);
+        unsigned char b1 = (unsigned char)(ca.b + (cb.b - ca.b) * t1);
+        unsigned char a1 = (unsigned char)(alpha_a + (alpha_b - alpha_a) * t1);
+
+        for (int s = 0; s < slices; s++) {
+            // Four corners of this quad on the cylinder surface
+            float ox0 = radius * (perp1.x*cos_t[s]   + perp2.x*sin_t[s]);
+            float oy0 = radius * (perp1.y*cos_t[s]   + perp2.y*sin_t[s]);
+            float oz0 = radius * (perp1.z*cos_t[s]   + perp2.z*sin_t[s]);
+            float ox1 = radius * (perp1.x*cos_t[s+1] + perp2.x*sin_t[s+1]);
+            float oy1 = radius * (perp1.y*cos_t[s+1] + perp2.y*sin_t[s+1]);
+            float oz1 = radius * (perp1.z*cos_t[s+1] + perp2.z*sin_t[s+1]);
+
+            // Triangle 1
+            rlColor4ub(r0, g0, b0, a0);
+            rlVertex3f(c0.x+ox0, c0.y+oy0, c0.z+oz0);
+            rlColor4ub(r1, g1, b1, a1);
+            rlVertex3f(c1.x+ox0, c1.y+oy0, c1.z+oz0);
+            rlColor4ub(r0, g0, b0, a0);
+            rlVertex3f(c0.x+ox1, c0.y+oy1, c0.z+oz1);
+
+            // Triangle 2
+            rlColor4ub(r0, g0, b0, a0);
+            rlVertex3f(c0.x+ox1, c0.y+oy1, c0.z+oz1);
+            rlColor4ub(r1, g1, b1, a1);
+            rlVertex3f(c1.x+ox0, c1.y+oy0, c1.z+oz0);
+            rlVertex3f(c1.x+ox1, c1.y+oy1, c1.z+oz1);
+        }
+    }
+    rlEnd();
 }
 
 void vehicle_cleanup(vehicle_t *v) {

@@ -113,10 +113,14 @@ void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
 // Reset the path trail.
 void vehicle_reset_trail(vehicle_t *v);
 
-// Draw correlation ribbon between two vehicles (cross-vehicle overlay).
-void vehicle_draw_correlation_ribbon(
+// Draw correlation curtain between two vehicles (cross-vehicle overlay).
+void vehicle_draw_correlation_curtain(
     const vehicle_t *va, const vehicle_t *vb,
     view_mode_t view_mode, Vector3 cam_pos);
+
+// Draw thick correlation line between two vehicles at current positions.
+void vehicle_draw_correlation_line(
+    const vehicle_t *va, const vehicle_t *vb);
 
 // Unload model resources.
 void vehicle_cleanup(vehicle_t *v);
