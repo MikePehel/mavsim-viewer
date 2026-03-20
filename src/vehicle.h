@@ -13,6 +13,7 @@ typedef enum {
     GROUP_VTOL,
     GROUP_TAILSITTER,
     GROUP_ROVER,
+    GROUP_ROV,
     GROUP_COUNT,
 } model_group_t;
 
@@ -38,6 +39,7 @@ extern const int vehicle_model_count;
 #define MODEL_FPV_HEX     5
 #define MODEL_VTOL        6
 #define MODEL_ROVER       7
+#define MODEL_ROV         8
 
 typedef struct {
     Model model;

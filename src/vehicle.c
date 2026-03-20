@@ -20,13 +20,14 @@
 const vehicle_model_info_t vehicle_models[] = {
     //  path                                name            scale  pitch    yaw       group
     { "models/px4_quadrotor.obj",         "Quadrotor",    1.0f,    0.0f, 180.0f,   GROUP_QUAD },
-    { "models/cessna.obj",                "Fixed-wing",   1.33f,   0.0f,  90.0f,   GROUP_FIXED_WING },
-    { "models/x_vert.obj",                "Tailsitter",   1.0f,  -90.0f,  90.0f,   GROUP_TAILSITTER },
+    { "models/px4_fixed_wing.obj",        "Fixed-wing",   1.15f,   0.0f, 180.0f,   GROUP_FIXED_WING },
+    { "models/px4_tailsitter.obj",        "Tailsitter",   1.0f,    0.0f, 180.0f,   GROUP_TAILSITTER },
     { "models/fpv_quadrotor.obj",         "FPV Quad",     0.75f,   0.0f,   0.0f,   GROUP_QUAD },
     { "models/px4_hexarotor.obj",          "Hexarotor",    0.9f,    0.0f,   0.0f,   GROUP_HEX },
     { "models/fpv_hexarotor.obj",         "FPV Hex",      0.85f,   0.0f,   0.0f,   GROUP_HEX },
     { "models/vtol_wing.obj",             "VTOL",         1.5f,    0.0f, 180.0f,   GROUP_VTOL },
     { "models/rover_4.obj",              "Rover",        1.0f,    0.0f,   0.0f,   GROUP_ROVER },
+    { "models/rov.obj",                  "ROV",          1.0f,    0.0f, 180.0f,   GROUP_ROV },
 };
 const int vehicle_model_count = sizeof(vehicle_models) / sizeof(vehicle_models[0]);
 
@@ -84,9 +85,15 @@ void vehicle_load_model(vehicle_t *v, int model_idx) {
     if (model_idx < 0 || model_idx >= vehicle_model_count)
         model_idx = 0;
 
-    // Unload previous model if loaded
-    if (v->model.meshCount > 0)
+    // Unload previous model if loaded.
+    // Reset material shaders to default first — UnloadModel calls UnloadMaterial
+    // which destroys any non-default shader. Our shared lighting_shader would be
+    // deleted, hanging the GPU on subsequent draws.
+    if (v->model.meshCount > 0) {
+        for (int i = 0; i < v->model.materialCount; i++)
+            v->model.materials[i].shader.id = rlGetShaderIdDefault();
         UnloadModel(v->model);
+    }
 
     const vehicle_model_info_t *info = &vehicle_models[model_idx];
     v->model_idx = model_idx;
@@ -149,6 +156,10 @@ void vehicle_set_type(vehicle_t *v, uint8_t mav_type) {
         case 11: // MAV_TYPE_SURFACE_BOAT
             group = GROUP_ROVER;
             default_model = MODEL_ROVER;
+            break;
+        case 12: // MAV_TYPE_SUBMARINE
+            group = GROUP_ROV;
+            default_model = MODEL_ROV;
             break;
         default:
             group = GROUP_QUAD;
@@ -1027,6 +1038,8 @@ void vehicle_draw_correlation_line(
 }
 
 void vehicle_cleanup(vehicle_t *v) {
+    for (int i = 0; i < v->model.materialCount; i++)
+        v->model.materials[i].shader.id = rlGetShaderIdDefault();
     UnloadModel(v->model);
     free(v->trail);
     free(v->trail_roll);
