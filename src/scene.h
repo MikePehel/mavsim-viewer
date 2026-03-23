@@ -22,18 +22,12 @@ typedef enum {
     ORTHO_RIGHT,    // Alt+5
 } ortho_mode_t;
 
-typedef enum {
-    VIEW_GRID = 0,
-    VIEW_REZ,
-    VIEW_SNOW,
-    VIEW_COUNT,     // public modes end here
-    VIEW_1988,      // hidden mode (not in V cycle)
-} view_mode_t;
-
 typedef struct {
     Camera3D camera;
     camera_mode_t cam_mode;
-    view_mode_t view_mode;
+    int theme_index;
+    bool theme_1988_active;
+    theme_registry_t theme_reg;
     float chase_distance;
     float chase_yaw;    // horizontal orbit angle (radians)
     float chase_pitch;  // vertical orbit angle (radians)

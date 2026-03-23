@@ -452,8 +452,7 @@ void vehicle_draw(vehicle_t *v, const theme_t *theme, bool selected,
         Color col_down     = theme->trail_descend;
         Color col_roll_pos = theme->trail_roll_pos;
         Color col_roll_neg = theme->trail_roll_neg;
-        // Light themes (snow) use thick ribbon trails for visibility
-        bool thick = (theme->sky.r > 200 && theme->sky.g > 200 && theme->sky.b > 200);
+        bool thick = theme->thick_trails;
 
         // Batched trail: single rlBegin/rlEnd instead of per-segment DrawLine3D
         rlBegin(thick ? RL_TRIANGLES : RL_LINES);

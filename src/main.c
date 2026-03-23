@@ -1,8 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #ifdef _MSC_VER
 #define _USE_MATH_DEFINES
+#include <direct.h>
 #endif
 #include <math.h>
 
@@ -574,6 +576,48 @@ int main(int argc, char *argv[]) {
         // Update HUD sim time from selected vehicle
         hud_update(&hud, sources[selected].state.time_usec,
                    sources[selected].connected, GetFrameTime());
+
+        // Handle file drops (.mvt theme files)
+        if (IsFileDropped()) {
+            FilePathList dropped = LoadDroppedFiles();
+            for (unsigned int i = 0; i < dropped.count; i++) {
+                if (theme_registry_add(&scene.theme_reg, dropped.paths[i])) {
+                    int last = scene.theme_reg.user_count - 1;
+                    char msg[80];
+                    snprintf(msg, sizeof(msg), "Theme: %s", scene.theme_reg.name_bufs[last]);
+                    hud_toast(&hud, msg, 3.0f);
+
+                    // Copy to themes/ so it persists
+                    const char *src = dropped.paths[i];
+                    const char *fname = src;
+                    for (const char *p = src; *p; p++) {
+                        if (*p == '/' || *p == '\\') fname = p + 1;
+                    }
+                    char dest[512];
+                    snprintf(dest, sizeof(dest), "./themes/%s", fname);
+                    // Ensure themes/ exists, then copy if not already there
+                    #ifdef _WIN32
+                    _mkdir("./themes");
+                    #else
+                    mkdir("./themes", 0755);
+                    #endif
+                    if (strcmp(src, dest) != 0) {
+                        FILE *fin = fopen(src, "rb");
+                        FILE *fout = fin ? fopen(dest, "wb") : NULL;
+                        if (fin && fout) {
+                            char buf[4096];
+                            size_t n;
+                            while ((n = fread(buf, 1, sizeof(buf), fin)) > 0)
+                                fwrite(buf, 1, n, fout);
+                            printf("Theme saved to %s\n", dest);
+                        }
+                        if (fin) fclose(fin);
+                        if (fout) fclose(fout);
+                    }
+                }
+            }
+            UnloadDroppedFiles(dropped);
+        }
 
         // Handle input
         scene_handle_input(&scene);

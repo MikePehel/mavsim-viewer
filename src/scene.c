@@ -192,8 +192,10 @@ static Texture2D gen_ground_texture(void) {
 
 void scene_init(scene_t *s) {
     s->cam_mode = CAM_MODE_CHASE;
-    s->view_mode = VIEW_GRID;
-    s->theme = theme_for_view_mode(VIEW_GRID);
+    theme_registry_init(&s->theme_reg);
+    s->theme_index = 0;
+    s->theme_1988_active = false;
+    s->theme = s->theme_reg.themes[0];
     s->ortho_mode = ORTHO_NONE;
     s->ortho_span = 60.0f;
     s->ortho_pan = (Vector3){0};
@@ -426,14 +428,13 @@ void scene_handle_input(scene_t *s) {
     }
 
     if (IsKeyPressed(KEY_V)) {
-        // If in hidden mode, return to Grid; otherwise cycle public modes
-        if (s->view_mode >= VIEW_COUNT)
-            s->view_mode = VIEW_GRID;
-        else
-            s->view_mode = (s->view_mode + 1) % VIEW_COUNT;
-        s->theme = theme_for_view_mode(s->view_mode);
-        const char *names[] = {"Grid", "Rez", "Snow"};
-        printf("View: %s\n", names[s->view_mode]);
+        if (s->theme_1988_active) {
+            s->theme_1988_active = false;
+        } else {
+            s->theme_index = (s->theme_index + 1) % s->theme_reg.cyclable;
+        }
+        s->theme = s->theme_reg.themes[s->theme_index];
+        printf("View: %s\n", s->theme->name);
     }
 
     // Ctrl+1988 sequence detection for hidden mode
@@ -442,8 +443,8 @@ void scene_handle_input(scene_t *s) {
         if (s->seq_1988 < 4 && IsKeyPressed(expected[s->seq_1988])) {
             s->seq_1988++;
             if (s->seq_1988 == 4) {
-                s->view_mode = (s->view_mode == VIEW_1988) ? VIEW_GRID : VIEW_1988;
-                s->theme = theme_for_view_mode(s->view_mode);
+                s->theme_1988_active = !s->theme_1988_active;
+                s->theme = s->theme_1988_active ? &theme_1988 : s->theme_reg.themes[s->theme_index];
                 s->seq_1988 = 0;
             }
         } else if (IsKeyPressed(KEY_ONE) || IsKeyPressed(KEY_TWO) || IsKeyPressed(KEY_THREE) ||

@@ -389,22 +389,10 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
     Color border = theme->hud_border;
     Color warn = theme->hud_warn;
     Color label_color = accent_dim;
-
-    // Snow-like themes have a bright background, so text colors must be dark.
-    // Detect by checking if the background is bright (high luminance).
-    bool bright_bg = (bg.r + bg.g + bg.b) > 400;
-    Color value_color, dim_color, climb_color, connected_color;
-    if (bright_bg) {
-        value_color = (Color){10, 10, 15, 255};
-        dim_color = (Color){80, 85, 95, 160};
-        climb_color = (Color){ 0, 120, 50, 255 };
-        connected_color = (Color){ 0, 130, 60, 255 };
-    } else {
-        value_color = (Color){200, 208, 218, 255};
-        dim_color = (Color){200, 208, 218, 100};
-        climb_color = GREEN;
-        connected_color = (Color){100, 200, 100, 255};
-    }
+    Color value_color = theme->hud_value;
+    Color dim_color = theme->hud_dim;
+    Color climb_color = theme->hud_climb;
+    Color connected_color = theme->hud_connected;
 
     // Scale factor: 1.0 at 720p, ~1.33 at 1080p, ~1.6 at 1440p
     float s = powf(screen_h / 720.0f, 0.7f);
