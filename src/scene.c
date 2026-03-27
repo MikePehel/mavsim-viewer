@@ -104,8 +104,8 @@ static float clampf(float v, float lo, float hi) {
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
-#define GTEX_COLS  4       // atlas columns
-#define GTEX_ROWS  2       // atlas rows
+#define GTEX_COLS  8       // atlas columns
+#define GTEX_ROWS  4       // atlas rows
 #define GTEX_TILE  256     // individual tile size
 #define GTEX_VARIANTS (GTEX_COLS * GTEX_ROWS)  // 8
 #define GTEX_ATLAS_W (GTEX_COLS * GTEX_TILE)   // 1024
@@ -117,7 +117,13 @@ static Texture2D gen_ground_texture(void) {
 
     float seed_offsets[GTEX_VARIANTS][2] = {
         {  0.0f,  0.0f }, { 17.3f, 41.7f }, { 63.2f, 11.9f }, { 34.8f, 78.1f },
-        { 91.4f, 23.6f }, { 48.7f, 55.3f }, { 12.1f, 89.4f }, { 76.5f, 37.2f }
+        { 91.4f, 23.6f }, { 48.7f, 55.3f }, { 12.1f, 89.4f }, { 76.5f, 37.2f },
+        { 25.9f, 64.3f }, { 82.1f, 19.8f }, { 53.7f, 72.4f }, { 39.6f, 46.1f },
+        {  7.8f, 95.2f }, { 68.4f, 31.5f }, { 44.2f, 83.7f }, { 15.6f, 58.9f },
+        { 88.3f, 10.4f }, { 29.7f, 67.8f }, { 71.5f, 42.3f }, { 56.1f, 26.9f },
+        {  3.4f, 81.6f }, { 62.8f, 14.7f }, { 47.3f, 93.5f }, { 19.2f, 52.6f },
+        { 85.7f, 38.1f }, { 33.4f, 75.9f }, { 74.6f, 21.3f }, { 58.2f, 49.8f },
+        { 11.5f, 86.4f }, { 66.9f, 33.2f }, { 41.8f, 70.6f }, { 97.1f, 16.5f },
     };
 
     for (int tile = 0; tile < GTEX_VARIANTS; tile++) {
@@ -233,6 +239,7 @@ void scene_init(scene_t *s) {
     s->loc_groundTex  = GetShaderLocation(s->grid_shader, "groundTex");
     s->loc_colFog     = GetShaderLocation(s->grid_shader, "colFog");
     s->loc_colTint    = GetShaderLocation(s->grid_shader, "colTint");
+    s->loc_camPos     = GetShaderLocation(s->grid_shader, "camPos");
 
     // Load terrain texture from pre-baked PNG
     double t0 = GetTime();
@@ -562,6 +569,10 @@ static void draw_shader_grid(const scene_t *s,
     SetShaderValue(s->grid_shader, s->loc_spacing, &spacing, SHADER_UNIFORM_FLOAT);
     SetShaderValue(s->grid_shader, s->loc_majorEvery, &majorEvery, SHADER_UNIFORM_FLOAT);
     SetShaderValue(s->grid_shader, s->loc_axisWidth, &axisWidth, SHADER_UNIFORM_FLOAT);
+
+    // Camera position for distance-relative LOD
+    float cp[3] = { s->camera.position.x, s->camera.position.y, s->camera.position.z };
+    SetShaderValue(s->grid_shader, s->loc_camPos, cp, SHADER_UNIFORM_VEC3);
 
     // Terrain texture toggle
     int texOn = s->ground_tex_on ? 1 : 0;

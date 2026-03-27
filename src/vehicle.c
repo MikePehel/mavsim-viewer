@@ -22,11 +22,12 @@ const vehicle_model_info_t vehicle_models[] = {
     //  path                                name            scale  pitch    yaw       group
     { "models/px4_quadrotor.obj",         "Quadrotor",    1.0f,    0.0f, 180.0f,   GROUP_QUAD },
     { "models/px4_fixed_wing.obj",        "Fixed-wing",   1.15f,   0.0f, 180.0f,   GROUP_FIXED_WING },
-    { "models/px4_tailsitter.obj",        "Tailsitter",   1.0f,    0.0f, 180.0f,   GROUP_TAILSITTER },
+    { "models/tailsitter2.obj",          "Tailsitter",   1.0f,    0.0f, 180.0f,   GROUP_TAILSITTER },
     { "models/fpv_quadrotor.obj",         "FPV Quad",     0.75f,   0.0f,   0.0f,   GROUP_QUAD },
     { "models/px4_hexarotor.obj",          "Hexarotor",    0.9f,    0.0f,   0.0f,   GROUP_HEX },
     { "models/fpv_hexarotor.obj",         "FPV Hex",      0.85f,   0.0f,   0.0f,   GROUP_HEX },
     { "models/vtol_wing.obj",             "VTOL",         1.5f,    0.0f, 180.0f,   GROUP_VTOL },
+    { "models/xneg90testvtol.obj",     "VTOL New",     1.5f,    0.0f, 180.0f,   GROUP_VTOL },
     { "models/rover_4.obj",              "Rover",        1.0f,    0.0f,   0.0f,   GROUP_ROVER },
     { "models/rov.obj",                  "ROV",          1.0f,    0.0f, 180.0f,   GROUP_ROV },
 };
@@ -34,42 +35,147 @@ const int vehicle_model_count = sizeof(vehicle_models) / sizeof(vehicle_models[0
 
 // ── Material remapping ──────────────────────────────────────────────────────
 // Heuristic color detection works across OBJ models with standard MTL colors.
+// Case-insensitive substring check
+static int str_contains_ci(const char *haystack, const char *needle) {
+    int nlen = (int)strlen(needle);
+    for (const char *p = haystack; *p; p++) {
+        int match = 1;
+        for (int i = 0; i < nlen && p[i]; i++) {
+            char a = p[i] >= 'A' && p[i] <= 'Z' ? p[i] + 32 : p[i];
+            char b = needle[i] >= 'A' && needle[i] <= 'Z' ? needle[i] + 32 : needle[i];
+            if (a != b) { match = 0; break; }
+        }
+        if (match) return 1;
+    }
+    return 0;
+}
+
+// Material name-to-role mapping entry
+typedef struct {
+    char name[64];
+    float kd[3]; // Kd from MTL (used to find Raylib material index)
+} mtl_entry_t;
+
+// Parse MTL file for material names and their Kd values
+static int parse_mtl_entries(const char *obj_path, mtl_entry_t *entries, int max) {
+    // Derive MTL path from OBJ path
+    char mtl_path[512];
+    asset_path(obj_path, mtl_path, sizeof(mtl_path));
+    // Replace .obj with .mtl
+    int len = (int)strlen(mtl_path);
+    if (len > 4) { mtl_path[len-3] = 'm'; mtl_path[len-2] = 't'; mtl_path[len-1] = 'l'; }
+
+    FILE *f = fopen(mtl_path, "r");
+    if (!f) return 0;
+
+    int count = 0;
+    char line[256];
+    while (fgets(line, sizeof(line), f) && count < max) {
+        if (strncmp(line, "newmtl ", 7) == 0) {
+            char *name = line + 7;
+            int nlen = (int)strlen(name);
+            while (nlen > 0 && (name[nlen-1] == '\n' || name[nlen-1] == '\r')) nlen--;
+            name[nlen] = '\0';
+            strncpy(entries[count].name, name, 63);
+            entries[count].name[63] = '\0';
+            entries[count].kd[0] = entries[count].kd[1] = entries[count].kd[2] = 0;
+            count++;
+        } else if (strncmp(line, "Kd ", 3) == 0 && count > 0) {
+            sscanf(line + 3, "%f %f %f",
+                   &entries[count-1].kd[0], &entries[count-1].kd[1], &entries[count-1].kd[2]);
+        }
+    }
+    fclose(f);
+    return count;
+}
+
+// Find Raylib material index by matching Kd color (within tolerance)
+static int find_material_by_kd(const Model *model, float kd_r, float kd_g, float kd_b) {
+    for (int i = 0; i < model->materialCount; i++) {
+        Color c = model->materials[i].maps[MATERIAL_MAP_DIFFUSE].color;
+        int mr = (int)(kd_r * 255.0f);
+        int mg = (int)(kd_g * 255.0f);
+        int mb = (int)(kd_b * 255.0f);
+        if (abs(c.r - mr) < 10 && abs(c.g - mg) < 10 && abs(c.b - mb) < 10)
+            return i;
+    }
+    return -1;
+}
+
 static void remap_materials(vehicle_t *v) {
     v->red_material_idx = -1;
     v->green_material_idx = -1;
     v->front_material_idx = -1;
     v->back_material_idx = -1;
-    for (int i = 0; i < v->model.materialCount; i++) {
-        Color *c = &v->model.materials[i].maps[MATERIAL_MAP_DIFFUSE].color;
-        // Yellow_Metal (front arms) → #FFC832 — matches Grid trail forward
-        if (c->r > 200 && c->g > 100 && c->b < 100) {
-            *c = (Color){ 255, 200, 50, 255 };
-            v->front_material_idx = i;
-        }
-        // Purple_Metal (back arms) → #A03CFF — matches Grid trail backward
-        else if (c->b > 200 && c->r > 100 && c->g < 100) {
-            *c = (Color){ 160, 60, 255, 255 };
-            v->back_material_idx = i;
-        }
-        // Green_Metal (starboard/side arms) → #29FF4F
-        else if (c->g > 200 && c->r < 100 && c->b < 100) {
-            *c = (Color){ 41, 255, 79, 255 };
-            v->green_material_idx = i;
-        }
-        // Red_Metal (port/side arms) → #CC2121
-        else if (c->r > 100 && c->g < 50 && c->b < 50) {
+
+    // Parse MTL for name→Kd mapping, then match Kd to Raylib material index
+    const vehicle_model_info_t *info = &vehicle_models[v->model_idx];
+    mtl_entry_t entries[32];
+    int entry_count = parse_mtl_entries(info->path, entries, 32);
+
+    int name_matched = 0;
+    for (int e = 0; e < entry_count; e++) {
+        int idx = find_material_by_kd(&v->model, entries[e].kd[0], entries[e].kd[1], entries[e].kd[2]);
+        if (idx < 0) continue;
+
+        Color *c = &v->model.materials[idx].maps[MATERIAL_MAP_DIFFUSE].color;
+        const char *name = entries[e].name;
+
+        if (str_contains_ci(name, "port")) {
             *c = (Color){ 204, 33, 33, 255 };
-            v->red_material_idx = i;
-        }
-        // Blue_Metal (legacy) → #272fc5
-        else if (c->b > 100 && c->r < 50)
-            *c = (Color){ 39, 47, 197, 255 };
-        // Gray_Plastic (props) → #5075a2
-        else if (c->r > 60 && c->r < 140 && c->g > 60 && c->g < 140)
+            v->red_material_idx = idx;
+            name_matched++;
+        } else if (str_contains_ci(name, "starboard")) {
+            *c = (Color){ 41, 255, 79, 255 };
+            v->green_material_idx = idx;
+            name_matched++;
+        } else if (str_contains_ci(name, "front")) {
+            *c = (Color){ 255, 200, 50, 255 };
+            v->front_material_idx = idx;
+            name_matched++;
+        } else if (str_contains_ci(name, "back") || str_contains_ci(name, "rear")) {
+            *c = (Color){ 160, 60, 255, 255 };
+            v->back_material_idx = idx;
+            name_matched++;
+        } else if (str_contains_ci(name, "body") || str_contains_ci(name, "wing") || str_contains_ci(name, "fuse")) {
+            *c = (Color){ 1, 6, 55, 255 };
+            name_matched++;
+        } else if (str_contains_ci(name, "prop")) {
             *c = (Color){ 80, 117, 162, 255 };
-        // Textolite (body, near-black) → #0e1f2f
-        else if (c->r < 20 && c->g < 20 && c->b < 20)
-            *c = (Color){ 14, 31, 47, 255 };
+            name_matched++;
+        } else if (str_contains_ci(name, "mot")) {
+            *c = (Color){ 30, 30, 38, 255 };
+            name_matched++;
+        }
+    }
+
+    // Fall back to heuristic color matching if no names matched
+    if (name_matched == 0) {
+        for (int i = 0; i < v->model.materialCount; i++) {
+            Color *c = &v->model.materials[i].maps[MATERIAL_MAP_DIFFUSE].color;
+            if (c->r > 200 && c->g > 100 && c->b < 100) {
+                *c = (Color){ 255, 200, 50, 255 };
+                v->front_material_idx = i;
+            }
+            else if (c->b > 200 && c->r > 100 && c->g < 100) {
+                *c = (Color){ 160, 60, 255, 255 };
+                v->back_material_idx = i;
+            }
+            else if (c->g > 200 && c->r < 100 && c->b < 100) {
+                *c = (Color){ 41, 255, 79, 255 };
+                v->green_material_idx = i;
+            }
+            else if (c->r > 100 && c->g < 50 && c->b < 50) {
+                *c = (Color){ 204, 33, 33, 255 };
+                v->red_material_idx = i;
+            }
+            else if (c->b > 100 && c->r < 50)
+                *c = (Color){ 39, 47, 197, 255 };
+            else if (c->r > 60 && c->r < 140 && c->g > 60 && c->g < 140)
+                *c = (Color){ 80, 117, 162, 255 };
+            else if (c->r < 30 && c->g < 30 && c->b < 40)
+                *c = (Color){ 14, 14, 22, 255 };
+        }
     }
 
     // Assign lighting shader to all materials (shader stored in vehicle_init)

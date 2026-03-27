@@ -1,0 +1,99 @@
+[theme]
+name: 2501
+priority: 90
+
+[scene]
+sky: 0 0 0 255
+ground: 0 0 0 255
+grid_minor: 140 140 145 60
+grid_major: 220 220 225 140
+axis_x: 180 25 55 220
+axis_z: 60 60 140 220
+fog: 2 2 6 255
+tint: 3 3 8 255
+
+[hud]
+accent: 240 240 245 255
+accent_dim: 140 140 150 180
+highlight: 240 240 245 255
+warn: 180 25 55 255
+bg: 3 3 6 235
+border: 60 60 70 100
+adi_sky: 15 30 80 200
+adi_ground: 40 10 30 200
+adi_horizon: 240 240 245 255
+adi_wing: 180 25 55 255
+
+[trail]
+forward: 30 100 220 180
+backward: 100 40 180 255
+climb: 30 140 60 255
+descend: 200 80 40 255
+roll_pos: 200 190 40 255
+roll_neg: 150 20 35 255
+
+[arms]
+front: 30 100 220 255
+back: 100 40 180 255
+port: 150 20 35 255
+starboard: 30 140 60 255
+classic_front: 180 25 55 255
+classic_back: 20 20 40 255
+classic_side: 120 130 150 255
+
+[ribbon]
+stop_0: 5 10 30 255
+stop_1: 15 30 80 255
+stop_2: 40 20 90 255
+stop_3: 100 20 45 255
+stop_4: 190 155 30 255
+stop_5: 200 190 40 255
+stop_6: 255 255 255 255
+
+[debug]
+accent: 240 240 245 220
+text: 220 220 225 230
+dim: 100 100 110 100
+bg: 3 3 6 210
+graph_bg: 0 0 2 200
+graph_grid: 40 40 50 80
+tier1: 200 190 40 255
+tier2: 180 25 55 255
+tier3: 150 20 35 255
+
+[prompt]
+scrim: 0 0 0 170
+box_bg: 5 5 8 240
+border: 80 80 90 100
+subtitle: 140 140 150 200
+hint: 90 90 100 160
+key: 30 100 220 220
+text: 240 240 245 255
+title: 180 25 55 255
+
+[ground_track]
+fill: 20 40 100 80
+edge: 30 100 220 180
+shadow: 100 40 180 100
+
+[ortho]
+grid_minor: 140 140 145 100
+grid_major: 220 220 225 200
+
+[drone_palette]
+color_0: 30 100 220 255
+color_1: 180 25 55 255
+color_2: 100 40 180 255
+color_3: 200 190 40 255
+color_4: 30 140 60 255
+color_5: 200 60 80 255
+color_6: 60 60 140 255
+color_7: 190 155 30 255
+color_8: 120 130 150 255
+color_9: 200 80 40 255
+color_10: 40 180 200 255
+color_11: 150 20 35 255
+color_12: 80 100 200 255
+color_13: 240 200 180 255
+color_14: 140 160 200 255
+color_15: 255 220 200 255
