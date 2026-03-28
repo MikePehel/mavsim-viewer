@@ -48,6 +48,7 @@ if(NOT BUILD_TESTING_ONLY)
         src/vehicle.c
         src/scene.c
         src/hud.c
+        src/tactical_hud.c
         src/debug_panel.c
         src/ortho_panel.c
         src/asset_path.c

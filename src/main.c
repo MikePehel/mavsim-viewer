@@ -19,6 +19,7 @@
 #include "vehicle.h"
 #include "scene.h"
 #include "hud.h"
+#include "tactical_hud.h"
 #include "debug_panel.h"
 #include "ortho_panel.h"
 #include "theme.h"
@@ -452,7 +453,14 @@ int main(int argc, char *argv[]) {
     memset(was_connected, 0, sizeof(was_connected));
     Vector3 last_pos[MAX_VEHICLES];
     memset(last_pos, 0, sizeof(last_pos));
-    bool show_hud = true;
+    // HUD mode is stored in hud.mode (HUD_CONSOLE / HUD_TACTICAL / HUD_OFF)
+    float saved_chase_distance = 0.0f;  // saved distance when entering tactical mode
+    float tactical_chase_target = 1.6f; // close zoom for tactical (drone ~45% of screen)
+    // Key chord state for two-digit drone selection (10-16)
+    #define CHORD_TIMEOUT 0.3
+    int chord_first = -1;
+    double chord_time = 0.0;
+    bool chord_shift = false;
     int trail_mode = 1;              // 0=off, 1=directional trail, 2=speed ribbon
     bool show_ground_track = false;  // ground projection off by default
     bool classic_colors = false;     // L key: toggle classic (red/blue) vs modern (yellow/purple)
@@ -798,9 +806,20 @@ int main(int argc, char *argv[]) {
             hud.show_help = !hud.show_help;
         }
 
-        // Toggle HUD visibility
+        // Cycle HUD mode: Console → Tactical → Off
         if (IsKeyPressed(KEY_H)) {
-            show_hud = !show_hud;
+            hud_mode_t prev_mode = hud.mode;
+            hud.mode = (hud.mode + 1) % HUD_MODE_COUNT;
+            const char *mode_names[] = { "Console HUD", "Tactical HUD", "HUD Off" };
+            hud_toast(&hud, mode_names[hud.mode], 2.0f);
+
+            // Camera: snap to close zoom on tactical entry, restore on exit
+            if (hud.mode == HUD_TACTICAL) {
+                saved_chase_distance = scene.chase_distance;
+                scene.chase_distance = tactical_chase_target;
+            } else if (prev_mode == HUD_TACTICAL) {
+                scene.chase_distance = saved_chase_distance;
+            }
         }
 
         // Shift+T: cycle correlation overlay (off → ribbon → line → off)
@@ -887,39 +906,100 @@ int main(int argc, char *argv[]) {
                 hud.pinned_count = 0;
                 memset(hud.pinned, -1, sizeof(hud.pinned));
             }
-            // Number keys 1-9: plain = select + clear pins, SHIFT = toggle pin
-            for (int k = KEY_ONE; k <= KEY_NINE; k++) {
-                if (IsKeyPressed(k)) {
-                    int idx = k - KEY_ONE;
-                    if (idx >= vehicle_count) continue;
+            // Number keys 0-9: single digit or two-digit chord for drones 10-16
+            {
+                int digit = -1;
+                for (int k = KEY_ZERO; k <= KEY_NINE; k++) {
+                    if (IsKeyPressed(k)) { digit = k - KEY_ZERO; break; }
+                }
 
-                    if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) {
-                        // SHIFT+number: toggle pin
-                        if (idx == selected) continue;  // can't pin the primary
+                bool shift_held = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+                bool ctrl_held = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
 
-                        // Check if already pinned
-                        int found = -1;
-                        for (int p = 0; p < hud.pinned_count; p++) {
-                            if (hud.pinned[p] == idx) { found = p; break; }
+                // Check chord timeout
+                if (chord_first >= 0 && GetTime() - chord_time > CHORD_TIMEOUT) {
+                    int idx = chord_first - 1;
+                    if (idx >= 0 && idx < vehicle_count) {
+                        if (chord_shift) {
+                            if (idx != selected) {
+                                int found = -1;
+                                for (int p = 0; p < hud.pinned_count; p++)
+                                    if (hud.pinned[p] == idx) { found = p; break; }
+                                if (found >= 0) {
+                                    for (int p = found; p < hud.pinned_count - 1; p++)
+                                        hud.pinned[p] = hud.pinned[p + 1];
+                                    hud.pinned_count--;
+                                    hud.pinned[hud.pinned_count] = -1;
+                                } else if (hud.pinned_count < HUD_MAX_PINNED && hud.pinned_count < vehicle_count - 1) {
+                                    hud.pinned[hud.pinned_count++] = idx;
+                                }
+                            }
+                        } else {
+                            selected = idx;
+                            hud.pinned_count = 0;
+                            memset(hud.pinned, -1, sizeof(hud.pinned));
                         }
-
-                        if (found >= 0) {
-                            // Unpin: shift remaining
-                            for (int p = found; p < hud.pinned_count - 1; p++)
-                                hud.pinned[p] = hud.pinned[p + 1];
-                            hud.pinned_count--;
-                            hud.pinned[hud.pinned_count] = -1;
-                        } else if (hud.pinned_count < HUD_MAX_PINNED && hud.pinned_count < vehicle_count - 1) {
-                            hud.pinned[hud.pinned_count++] = idx;
-                        }
-                    } else if (!IsKeyDown(KEY_LEFT_CONTROL) && !IsKeyDown(KEY_RIGHT_CONTROL)
-                               && !IsKeyDown(KEY_LEFT_ALT) && !IsKeyDown(KEY_RIGHT_ALT)) {
-                        // Plain number: switch primary, clear pins
-                        selected = idx;
-                        hud.pinned_count = 0;
-                        memset(hud.pinned, -1, sizeof(hud.pinned));
                     }
-                    // Note: Ctrl+number is reserved for 1988 easter egg
+                    chord_first = -1;
+                }
+
+                if (digit >= 0 && !ctrl_held) {
+                    if (chord_first >= 0) {
+                        int two_digit = chord_first * 10 + digit;
+                        int idx = two_digit - 1;
+                        chord_first = -1;
+
+                        if (idx >= 0 && idx < vehicle_count) {
+                            if (chord_shift) {
+                                if (idx != selected) {
+                                    int found = -1;
+                                    for (int p = 0; p < hud.pinned_count; p++)
+                                        if (hud.pinned[p] == idx) { found = p; break; }
+                                    if (found >= 0) {
+                                        for (int p = found; p < hud.pinned_count - 1; p++)
+                                            hud.pinned[p] = hud.pinned[p + 1];
+                                        hud.pinned_count--;
+                                        hud.pinned[hud.pinned_count] = -1;
+                                    } else if (hud.pinned_count < HUD_MAX_PINNED && hud.pinned_count < vehicle_count - 1) {
+                                        hud.pinned[hud.pinned_count++] = idx;
+                                    }
+                                }
+                            } else {
+                                selected = idx;
+                                hud.pinned_count = 0;
+                                memset(hud.pinned, -1, sizeof(hud.pinned));
+                            }
+                        }
+                    } else if (digit >= 1 && digit <= 9) {
+                        if (vehicle_count > 9) {
+                            chord_first = digit;
+                            chord_time = GetTime();
+                            chord_shift = shift_held;
+                        } else {
+                            int idx = digit - 1;
+                            if (idx < vehicle_count) {
+                                if (shift_held) {
+                                    if (idx != selected) {
+                                        int found = -1;
+                                        for (int p = 0; p < hud.pinned_count; p++)
+                                            if (hud.pinned[p] == idx) { found = p; break; }
+                                        if (found >= 0) {
+                                            for (int p = found; p < hud.pinned_count - 1; p++)
+                                                hud.pinned[p] = hud.pinned[p + 1];
+                                            hud.pinned_count--;
+                                            hud.pinned[hud.pinned_count] = -1;
+                                        } else if (hud.pinned_count < HUD_MAX_PINNED && hud.pinned_count < vehicle_count - 1) {
+                                            hud.pinned[hud.pinned_count++] = idx;
+                                        }
+                                    }
+                                } else {
+                                    selected = idx;
+                                    hud.pinned_count = 0;
+                                    memset(hud.pinned, -1, sizeof(hud.pinned));
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1055,10 +1135,18 @@ int main(int argc, char *argv[]) {
         debug_panel_update(&dbg_panel, GetFrameTime());
 
         // Update camera to follow selected vehicle
-        scene_update_camera(&scene, vehicles[selected].position, vehicles[selected].rotation);
+        // In tactical mode, raise the look-at target so the drone renders 1/6 lower on screen
+        {
+            Vector3 cam_target = vehicles[selected].position;
+            if (hud.mode == HUD_TACTICAL) {
+                cam_target.y += scene.chase_distance * 0.10f;
+            }
+            scene_update_camera(&scene, cam_target, vehicles[selected].rotation);
+        }
 
         // Render ortho views to textures (before main BeginDrawing)
-        if (ortho.visible) {
+        // Always render when tactical HUD is active (radar uses top-down texture)
+        if (ortho.visible || hud.mode == HUD_TACTICAL) {
             ortho_panel_update(&ortho, vehicles[selected].position);
             ortho_panel_render(&ortho, vehicles, vehicle_count,
                                selected, scene.theme,
@@ -1108,7 +1196,7 @@ int main(int argc, char *argv[]) {
                     }
                 }
 
-                // Axis gizmo at selected drone (Z key toggle)
+                // Gimbal rings at selected drone (Z key toggle)
                 if (show_axes && vehicles[selected].active) {
                     Vector3 com = vehicles[selected].position;
                     com.y += vehicles[selected].model_scale * 0.15f;
@@ -1148,12 +1236,19 @@ int main(int argc, char *argv[]) {
                                       hud.font_label, show_corr_labels);
 
             // HUD
-            if (show_hud) {
+            {
                 bool has_awaiting_gps = vehicles[selected].active &&
                     !vehicles[selected].origin_set && sources[selected].home.valid;
-                hud_draw(&hud, vehicles, sources, vehicle_count,
-                         selected, GetScreenWidth(), GetScreenHeight(),
-                         scene.theme, ghost_mode, has_tier3, has_awaiting_gps);
+                if (hud.mode == HUD_CONSOLE) {
+                    hud_draw(&hud, vehicles, sources, vehicle_count,
+                             selected, GetScreenWidth(), GetScreenHeight(),
+                             scene.theme, ghost_mode, has_tier3, has_awaiting_gps);
+                } else if (hud.mode == HUD_TACTICAL) {
+                    tactical_hud_draw(&hud, vehicles, sources, vehicle_count,
+                                      selected, GetScreenWidth(), GetScreenHeight(),
+                                      scene.theme, ghost_mode, has_tier3, has_awaiting_gps,
+                                      &ortho, trail_mode, corr_mode);
+                }
             }
 
             // Debug panel
@@ -1173,7 +1268,7 @@ int main(int argc, char *argv[]) {
             }
 
             // Ortho panel overlay
-            int bar_h = show_hud ? hud_bar_height(&hud, GetScreenHeight()) : 0;
+            int bar_h = (hud.mode == HUD_CONSOLE) ? hud_bar_height(&hud, GetScreenHeight()) : 0;
             ortho_panel_draw(&ortho, GetScreenHeight(), bar_h, scene.theme, hud.font_label,
                              vehicles, vehicle_count, selected, trail_mode,
                              corr_mode, hud.pinned, hud.pinned_count,

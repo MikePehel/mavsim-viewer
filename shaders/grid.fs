@@ -17,12 +17,13 @@ uniform int texEnabled;
 uniform sampler2D groundTex;
 uniform vec4 colFog;
 uniform vec4 colTint;
+uniform vec3 camPos;
 
 out vec4 finalColor;
 
 void main() {
     vec2 coord = fragWorldPos.xz;
-    float dist = length(coord);
+    float dist = length(coord - camPos.xz);
 
     // Ground color: flat or terrain-textured with distance fog
     vec4 ground = colGround;
@@ -31,14 +32,14 @@ void main() {
         vec2 tileCoord = floor(coord / 10.0);
         vec2 tileUV = fract(coord / 10.0);
 
-        // Hash tile coordinate to pick one of 8 atlas variants (0-7)
+        // Hash tile coordinate to pick one of 32 atlas variants (0-31)
         float h = fract(sin(dot(tileCoord, vec2(127.1, 311.7))) * 43758.5453);
-        int variant = int(h * 8.0);
-        variant = clamp(variant, 0, 7);
+        int variant = int(h * 32.0);
+        variant = clamp(variant, 0, 31);
 
-        // Map UV into correct atlas cell (4 cols × 2 rows)
-        vec2 atlasOffset = vec2(float(variant % 4) / 4.0, float(variant / 4) / 2.0);
-        vec2 texUV = atlasOffset + tileUV * vec2(1.0 / 4.0, 1.0 / 2.0);
+        // Map UV into correct atlas cell (8 cols × 4 rows)
+        vec2 atlasOffset = vec2(float(variant % 8) / 8.0, float(variant / 8) / 4.0);
+        vec2 texUV = atlasOffset + tileUV * vec2(1.0 / 8.0, 1.0 / 4.0);
 
         vec4 texColor = texture(groundTex, texUV);
         // Normalize texture luminance to a detail signal centered on 1.0

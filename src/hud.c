@@ -21,6 +21,7 @@
 
 
 void hud_init(hud_t *h) {
+    h->mode = HUD_CONSOLE;
     h->sim_time_s = 0.0f;
     h->pinned_count = 0;
     h->show_help = false;

@@ -8,7 +8,15 @@
 
 #define HUD_MAX_PINNED 15
 
+typedef enum {
+    HUD_CONSOLE,
+    HUD_TACTICAL,
+    HUD_OFF,
+    HUD_MODE_COUNT
+} hud_mode_t;
+
 typedef struct {
+    hud_mode_t mode;
     float sim_time_s;
     int pinned[HUD_MAX_PINNED];   // indices of pinned vehicles (-1 = empty)
     int pinned_count;

@@ -918,31 +918,228 @@ static void draw_axis_gizmo_at(float ox, float oy, float sc, int ortho_mode, Fon
 
 // ── 3D axis gizmo at world position ──────────────────────────────────────────
 
+// Draw a 3D ring (circle of line segments) at a position, in a given plane,
+// rotated by the drone's quaternion.
+// plane_a and plane_b are the two local axes that define the ring plane.
+// tri_angle is where to place the direction triangle (radians around the ring).
+static void draw_3d_ring(Vector3 pos, float radius, Quaternion rot,
+                          Vector3 plane_a, Vector3 plane_b,
+                          float tri_angle, Color color) {
+    int segs = 48;
+    for (int i = 0; i < segs; i++) {
+        float a1 = (float)i / segs * 2.0f * PI;
+        float a2 = (float)(i + 1) / segs * 2.0f * PI;
+        Vector3 local1 = {
+            plane_a.x * cosf(a1) * radius + plane_b.x * sinf(a1) * radius,
+            plane_a.y * cosf(a1) * radius + plane_b.y * sinf(a1) * radius,
+            plane_a.z * cosf(a1) * radius + plane_b.z * sinf(a1) * radius
+        };
+        Vector3 local2 = {
+            plane_a.x * cosf(a2) * radius + plane_b.x * sinf(a2) * radius,
+            plane_a.y * cosf(a2) * radius + plane_b.y * sinf(a2) * radius,
+            plane_a.z * cosf(a2) * radius + plane_b.z * sinf(a2) * radius
+        };
+        Vector3 w1 = Vector3RotateByQuaternion(local1, rot);
+        Vector3 w2 = Vector3RotateByQuaternion(local2, rot);
+        DrawLine3D(
+            (Vector3){pos.x + w1.x, pos.y + w1.y, pos.z + w1.z},
+            (Vector3){pos.x + w2.x, pos.y + w2.y, pos.z + w2.z},
+            color);
+    }
+
+    // Outward-pointing 4-sided pyramid at the apex of the ring.
+    // Tip extends radially outward, base sits on the ring surface.
+    float tri_size = radius * 0.06f;
+    float ta = tri_angle;
+
+    // Radial direction (outward from center)
+    Vector3 radial = {
+        plane_a.x * cosf(ta) + plane_b.x * sinf(ta),
+        plane_a.y * cosf(ta) + plane_b.y * sinf(ta),
+        plane_a.z * cosf(ta) + plane_b.z * sinf(ta)
+    };
+    // Tangent direction (along the ring)
+    Vector3 tangent = {
+        -plane_a.x * sinf(ta) + plane_b.x * cosf(ta),
+        -plane_a.y * sinf(ta) + plane_b.y * cosf(ta),
+        -plane_a.z * sinf(ta) + plane_b.z * cosf(ta)
+    };
+    // Normal to the ring plane
+    Vector3 normal = {
+        plane_a.y * plane_b.z - plane_a.z * plane_b.y,
+        plane_a.z * plane_b.x - plane_a.x * plane_b.z,
+        plane_a.x * plane_b.y - plane_a.y * plane_b.x
+    };
+
+    // Pyramid tip: radially outward from ring surface
+    Vector3 p_tip = {
+        radial.x * (radius + tri_size),
+        radial.y * (radius + tri_size),
+        radial.z * (radius + tri_size)
+    };
+    // Pyramid base: 4 corners on the ring, spread along tangent and normal
+    float bs = tri_size * 0.45f;
+    Vector3 p_b1 = { radial.x * radius + tangent.x * bs + normal.x * bs,
+                     radial.y * radius + tangent.y * bs + normal.y * bs,
+                     radial.z * radius + tangent.z * bs + normal.z * bs };
+    Vector3 p_b2 = { radial.x * radius - tangent.x * bs + normal.x * bs,
+                     radial.y * radius - tangent.y * bs + normal.y * bs,
+                     radial.z * radius - tangent.z * bs + normal.z * bs };
+    Vector3 p_b3 = { radial.x * radius - tangent.x * bs - normal.x * bs,
+                     radial.y * radius - tangent.y * bs - normal.y * bs,
+                     radial.z * radius - tangent.z * bs - normal.z * bs };
+    Vector3 p_b4 = { radial.x * radius + tangent.x * bs - normal.x * bs,
+                     radial.y * radius + tangent.y * bs - normal.y * bs,
+                     radial.z * radius + tangent.z * bs - normal.z * bs };
+
+    // Rotate all by quaternion
+    Vector3 wt  = Vector3RotateByQuaternion(p_tip, rot);
+    Vector3 wb1 = Vector3RotateByQuaternion(p_b1, rot);
+    Vector3 wb2 = Vector3RotateByQuaternion(p_b2, rot);
+    Vector3 wb3 = Vector3RotateByQuaternion(p_b3, rot);
+    Vector3 wb4 = Vector3RotateByQuaternion(p_b4, rot);
+
+    #define VOFF(v) (Vector3){pos.x + v.x, pos.y + v.y, pos.z + v.z}
+    // 4 faces of the pyramid + backfaces
+    DrawTriangle3D(VOFF(wt), VOFF(wb1), VOFF(wb2), color);
+    DrawTriangle3D(VOFF(wt), VOFF(wb2), VOFF(wb3), color);
+    DrawTriangle3D(VOFF(wt), VOFF(wb3), VOFF(wb4), color);
+    DrawTriangle3D(VOFF(wt), VOFF(wb4), VOFF(wb1), color);
+    DrawTriangle3D(VOFF(wt), VOFF(wb2), VOFF(wb1), color);
+    DrawTriangle3D(VOFF(wt), VOFF(wb3), VOFF(wb2), color);
+    DrawTriangle3D(VOFF(wt), VOFF(wb4), VOFF(wb3), color);
+    DrawTriangle3D(VOFF(wt), VOFF(wb1), VOFF(wb4), color);
+    #undef VOFF
+}
+
 void draw_axis_gizmo_3d(Vector3 pos, float scale, Quaternion rot) {
-    float len = scale;
+    float r = scale;
 
-    // Rotate unit axis vectors by the drone's quaternion
-    Vector3 ax = Vector3RotateByQuaternion((Vector3){len, 0, 0}, rot);
-    Vector3 ay = Vector3RotateByQuaternion((Vector3){0, len, 0}, rot);
-    Vector3 az = Vector3RotateByQuaternion((Vector3){0, 0, len}, rot);
+    // Decompose the full quaternion into a proper gimbal hierarchy by extracting
+    // each rotation from the quaternion's actual transformed axes, rather than
+    // using QuaternionToEuler (which uses a ZYX convention that doesn't match
+    // our Y-up aerospace gimbal order of yaw-pitch-roll).
+    //
+    // Gimbal order (outer to inner): Yaw (Y-axis) -> Pitch (X-axis) -> Roll (Z-axis)
+    // Full quaternion: rot = q_yaw * q_pitch * q_roll
 
-    Vector3 tip_x = { pos.x + ax.x, pos.y + ax.y, pos.z + ax.z };
-    Vector3 tip_y = { pos.x + ay.x, pos.y + ay.y, pos.z + ay.z };
-    Vector3 tip_z = { pos.x + az.x, pos.y + az.y, pos.z + az.z };
+    // Step 1: Extract yaw from the forward vector projected onto the XZ plane.
+    Vector3 fwd = Vector3RotateByQuaternion((Vector3){0, 0, -1}, rot);
+    float yaw = atan2f(-fwd.x, -fwd.z);
+    Quaternion q_yaw = QuaternionFromAxisAngle((Vector3){0, 1, 0}, yaw);
 
-    // X = red, Y = green, Z = blue
-    Color col_x = { 220,  60,  60, 240 };
-    Color col_y = {  60, 200,  60, 240 };
-    Color col_z = {  60, 100, 220, 240 };
+    // Step 2: Extract pitch. Remove yaw from the full quaternion to get
+    // the pitch+roll remainder: q_remainder = q_yaw^-1 * rot
+    Quaternion q_yaw_inv = QuaternionInvert(q_yaw);
+    Quaternion q_remainder = QuaternionMultiply(q_yaw_inv, rot);
 
-    DrawLine3D(pos, tip_x, col_x);
-    DrawLine3D(pos, tip_y, col_y);
-    DrawLine3D(pos, tip_z, col_z);
+    // The remainder's forward vector lies in the YZ plane (yaw removed).
+    // Pitch = how much the nose tilts up/down from horizontal.
+    Vector3 fwd_rem = Vector3RotateByQuaternion((Vector3){0, 0, -1}, q_remainder);
+    float pitch = atan2f(fwd_rem.y, -fwd_rem.z);
+    Quaternion q_pitch = QuaternionFromAxisAngle((Vector3){1, 0, 0}, pitch);
 
-    float r = len * 0.06f;
-    DrawSphere(tip_x, r, col_x);
-    DrawSphere(tip_y, r, col_y);
-    DrawSphere(tip_z, r, col_z);
+    // Build the yaw+pitch quaternion
+    Quaternion q_yaw_pitch = QuaternionMultiply(q_yaw, q_pitch);
+    Quaternion q_full = rot;
+
+    // Aerospace convention: ring order is yaw outermost, pitch middle, roll innermost.
+    // Each ring is drawn in its local plane, rotated by the cumulative quaternion up to
+    // that gimbal level. Pyramids point at the drone's actual forward/up/right.
+
+    // Yaw ring (cyan, outermost) — horizontal XZ plane, rotated by yaw only.
+    // plane_a = X, plane_b = -Z. Forward (-Z) is at angle PI/2 in atan2(sin, cos) = atan2(-Z, X).
+    Color col_yaw = { 0, 180, 204, 200 };
+    draw_3d_ring(pos, r * 1.15f, q_yaw, (Vector3){1, 0, 0}, (Vector3){0, 0, -1},
+                 PI * 0.5f, col_yaw);
+
+    // Pitch ring (green, middle) — vertical YZ plane, rotated by yaw+pitch.
+    // plane_a = -Z, plane_b = Y. Up (Y) is at angle PI/2.
+    Color col_pitch = { 52, 211, 153, 200 };
+    draw_3d_ring(pos, r, q_yaw_pitch, (Vector3){0, 0, -1}, (Vector3){0, 1, 0},
+                 PI * 0.5f, col_pitch);
+
+    // Roll ring (red, innermost) — vertical XY plane, rotated by full quaternion.
+    // plane_a = X, plane_b = Y. Right (X) is at angle 0.
+    Color col_roll = { 255, 100, 100, 200 };
+    draw_3d_ring(pos, r * 0.85f, q_full, (Vector3){1, 0, 0}, (Vector3){0, 1, 0},
+                 0.0f, col_roll);
+}
+
+// ── Draw single view at arbitrary position ───────────────────────────────────
+
+void ortho_panel_draw_single(const ortho_panel_t *op, int view_idx,
+                              float x, float y, float size,
+                              const theme_t *theme, Font font,
+                              const vehicle_t *vehicles, int vehicle_count,
+                              int selected, int trail_mode,
+                              int corr_mode, const int *pinned, int pinned_count) {
+    if (view_idx < 0 || view_idx >= ORTHO_VIEW_COUNT) return;
+
+    float ps = size;
+    Color accent = theme->hud_accent;
+
+    // Background
+    DrawRectangle((int)x, (int)y, (int)ps, (int)ps, (Color){ 5, 5, 12, 200 });
+
+    // Render texture
+    Rectangle src = { 0, (float)ORTHO_TEX_SIZE, (float)ORTHO_TEX_SIZE, (float)(-ORTHO_TEX_SIZE) };
+    Rectangle dst = { x, y, ps, ps };
+    DrawTexturePro(op->targets[view_idx].texture, src, dst, (Vector2){0, 0}, 0.0f, WHITE);
+
+    // Clip overlays
+    BeginScissorMode((int)x, (int)y, (int)ps, (int)ps);
+
+    Vector3 center = op->cameras[view_idx].target;
+
+    // 2D grid
+    draw_grid_2d(center, op->ortho_span, x, y, ps, view_idx,
+                 theme->ortho_grid_minor, theme->ortho_grid_major);
+
+    // 2D trails
+    for (int vi = 0; vi < vehicle_count; vi++) {
+        if (vehicles[vi].active || vehicle_count == 1) {
+            draw_trail_2d(&vehicles[vi], theme, trail_mode,
+                          center, op->ortho_span, x, y, ps, view_idx);
+        }
+    }
+
+    // Correlation line
+    if (corr_mode == 1 && pinned_count > 0) {
+        for (int p = 0; p < pinned_count; p++) {
+            int pidx = pinned[p];
+            if (pidx >= 0 && pidx < vehicle_count && vehicles[pidx].active
+                && pidx != selected) {
+                Vector3 pa = vehicles[selected].position;
+                Vector3 pb = vehicles[pidx].position;
+                Vector2 sa = world_to_panel(pa, center, op->ortho_span, x, y, ps, view_idx);
+                Vector2 sb = world_to_panel(pb, center, op->ortho_span, x, y, ps, view_idx);
+                Color ca = vehicles[selected].color;
+                Color cb = vehicles[pidx].color;
+                Color mid = {
+                    (unsigned char)((ca.r + cb.r) / 2),
+                    (unsigned char)((ca.g + cb.g) / 2),
+                    (unsigned char)((ca.b + cb.b) / 2), 200
+                };
+                DrawLineEx(sa, sb, 2.0f, mid);
+            }
+        }
+    }
+
+    // Drone position dots
+    for (int vi = 0; vi < vehicle_count; vi++) {
+        if (!vehicles[vi].active && vehicle_count > 1) continue;
+        Vector2 dp = world_to_panel(vehicles[vi].position, center,
+                                     op->ortho_span, x, y, ps, view_idx);
+        float dot_r = (vi == selected) ? 4.0f : 3.0f;
+        DrawCircle((int)dp.x, (int)dp.y, dot_r, vehicles[vi].color);
+    }
+
+    EndScissorMode();
+
+    // Border
+    Color border_col = (Color){ accent.r, accent.g, accent.b, 120 };
+    DrawRectangleLines((int)x, (int)y, (int)ps, (int)ps, border_col);
 }
 
 // ── Cleanup ──────────────────────────────────────────────────────────────────
