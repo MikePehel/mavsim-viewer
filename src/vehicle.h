@@ -4,6 +4,7 @@
 #include "raylib.h"
 #include "mavlink_receiver.h"
 #include "scene.h"
+#include "theme.h"
 
 // Model group — determines which models M-key cycles through
 typedef enum {
@@ -13,6 +14,7 @@ typedef enum {
     GROUP_VTOL,
     GROUP_TAILSITTER,
     GROUP_ROVER,
+    GROUP_ROV,
     GROUP_COUNT,
 } model_group_t;
 
@@ -38,6 +40,7 @@ extern const int vehicle_model_count;
 #define MODEL_FPV_HEX     5
 #define MODEL_VTOL        6
 #define MODEL_ROVER       7
+#define MODEL_ROV         8
 
 typedef struct {
     Model model;
@@ -115,7 +118,7 @@ extern bool trail_lod_enabled;
 
 // trail_mode: 0=off, 1=normal trail, 2=speed ribbon
 // classic_colors: false = modern (yellow/purple), true = classic (red/blue)
-void vehicle_draw(vehicle_t *v, view_mode_t view_mode, bool selected,
+void vehicle_draw(vehicle_t *v, const theme_t *theme, bool selected,
                   int trail_mode, bool show_ground_track, Vector3 cam_pos,
                   bool classic_colors);
 
@@ -158,7 +161,7 @@ void vehicle_draw_sys_marker_labels(Vector3 *positions, char labels[][48], int c
 // Draw correlation curtain between two vehicles (cross-vehicle overlay).
 void vehicle_draw_correlation_curtain(
     const vehicle_t *va, const vehicle_t *vb,
-    view_mode_t view_mode, Vector3 cam_pos);
+    const theme_t *theme, Vector3 cam_pos);
 
 // Draw thick correlation line between two vehicles at current positions.
 void vehicle_draw_correlation_line(

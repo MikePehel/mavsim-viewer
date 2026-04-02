@@ -1,4 +1,5 @@
 #include "scene.h"
+#include "theme.h"
 #include "asset_path.h"
 #include "raymath.h"
 #include "rlgl.h"
@@ -12,38 +13,6 @@
 #define GRID_EXTENT      500.0f
 #define GRID_SPACING     10.0f
 #define GRID_MAJOR_EVERY 5
-
-// Grid mode colors
-#define GRID_SKY       (Color){ 56,  56,  60, 255 }
-#define GRID_GROUND    (Color){ 32,  32,  34, 255 }
-#define GRID_MINOR     (Color){ 97,  97,  97, 128 }
-#define GRID_MAJOR     (Color){ 143, 143, 143, 128 }
-#define GRID_AXIS_X    (Color){ 200,  60,  60, 180 }
-#define GRID_AXIS_Z    (Color){ 60,   60, 200, 180 }
-
-// Rez mode colors
-#define REZ_SKY        (Color){ 12,  12,  18, 255 }  // near-black
-#define REZ_GROUND     (Color){ 2,    2,   4, 255 }  // black
-#define REZ_MINOR      (Color){ 0,  204, 218, 50 }   // teal, subtle
-#define REZ_MAJOR      (Color){ 0,  204, 218, 140 }  // teal, bright
-#define REZ_AXIS_X     (Color){ 0,  204, 218, 220 }  // teal, full
-#define REZ_AXIS_Z     (Color){ 0,  204, 218, 220 }  // teal, full
-
-// Snow mode colors (outdoor high-contrast)
-#define SNOW_SKY       (Color){ 240, 242, 245, 255 }
-#define SNOW_GROUND    (Color){ 228, 230, 233, 255 }
-#define SNOW_MINOR     (Color){ 155, 160, 168, 140 }
-#define SNOW_MAJOR     (Color){ 70,  75,  85, 200 }
-#define SNOW_AXIS_X    (Color){ 210,  30,  30, 230 }
-#define SNOW_AXIS_Z    (Color){ 30,   30, 210, 230 }
-
-// 1988 mode colors (synthwave)
-#define SYNTH_SKY      (Color){ 8,   8,  20, 255 }
-#define SYNTH_GROUND   (Color){ 5,   5,  16, 255 }
-#define SYNTH_MINOR    (Color){ 255, 20, 100, 50 }   // hot pink, subtle
-#define SYNTH_MAJOR    (Color){ 255, 20, 100, 160 }   // hot pink, bright
-#define SYNTH_AXIS_X   (Color){ 255, 20, 100, 220 }   // hot pink, full
-#define SYNTH_AXIS_Z   (Color){ 255, 20, 100, 220 }   // hot pink, full
 
 // ── Procedural terrain texture: packed dirt atlas ─────────────────────────────
 // 4 x 256x256 tiles in a 512x512 atlas. Torus-mapped noise for seamless edges.
@@ -223,7 +192,10 @@ static Texture2D gen_ground_texture(void) {
 
 void scene_init(scene_t *s) {
     s->cam_mode = CAM_MODE_CHASE;
-    s->view_mode = VIEW_GRID;
+    theme_registry_init(&s->theme_reg);
+    s->theme_index = 0;
+    s->theme_1988_active = false;
+    s->theme = s->theme_reg.themes[0];
     s->ortho_mode = ORTHO_NONE;
     s->ortho_span = 60.0f;
     s->ortho_pan = (Vector3){0};
@@ -520,13 +492,13 @@ void scene_handle_input(scene_t *s) {
     }
 
     if (IsKeyPressed(KEY_V)) {
-        // If in hidden mode, return to Grid; otherwise cycle public modes
-        if (s->view_mode >= VIEW_COUNT)
-            s->view_mode = VIEW_GRID;
-        else
-            s->view_mode = (s->view_mode + 1) % VIEW_COUNT;
-        const char *names[] = {"Grid", "Rez", "Snow"};
-        printf("View: %s\n", names[s->view_mode]);
+        if (s->theme_1988_active) {
+            s->theme_1988_active = false;
+        } else {
+            s->theme_index = (s->theme_index + 1) % s->theme_reg.cyclable;
+        }
+        s->theme = s->theme_reg.themes[s->theme_index];
+        printf("View: %s\n", s->theme->name);
     }
 
     // Ctrl+1988 sequence detection for hidden mode
@@ -535,7 +507,8 @@ void scene_handle_input(scene_t *s) {
         if (s->seq_1988 < 4 && IsKeyPressed(expected[s->seq_1988])) {
             s->seq_1988++;
             if (s->seq_1988 == 4) {
-                s->view_mode = (s->view_mode == VIEW_1988) ? VIEW_GRID : VIEW_1988;
+                s->theme_1988_active = !s->theme_1988_active;
+                s->theme = s->theme_1988_active ? &theme_1988 : s->theme_reg.themes[s->theme_index];
                 s->seq_1988 = 0;
             }
         } else if (IsKeyPressed(KEY_ONE) || IsKeyPressed(KEY_TWO) || IsKeyPressed(KEY_THREE) ||
@@ -679,19 +652,9 @@ static void draw_shader_grid(const scene_t *s,
 }
 
 void scene_draw(const scene_t *s) {
-    if (s->view_mode == VIEW_GRID) {
-        draw_shader_grid(s, GRID_GROUND, GRID_MINOR, GRID_MAJOR, GRID_AXIS_X, GRID_AXIS_Z,
-            (Color){ 42, 38, 32, 255 });
-    } else if (s->view_mode == VIEW_REZ) {
-        draw_shader_grid(s, REZ_GROUND, REZ_MINOR, REZ_MAJOR, REZ_AXIS_X, REZ_AXIS_Z,
-            (Color){ 31, 31, 59, 255 });
-    } else if (s->view_mode == VIEW_SNOW) {
-        draw_shader_grid(s, SNOW_GROUND, SNOW_MINOR, SNOW_MAJOR, SNOW_AXIS_X, SNOW_AXIS_Z,
-            (Color){ 215, 218, 222, 255 });
-    } else if (s->view_mode == VIEW_1988) {
-        draw_shader_grid(s, SYNTH_GROUND, SYNTH_MINOR, SYNTH_MAJOR, SYNTH_AXIS_X, SYNTH_AXIS_Z,
-            (Color){ 25, 25, 82, 255 });
-    }
+    const theme_t *t = s->theme;
+    draw_shader_grid(s, t->ground, t->grid_minor, t->grid_major,
+                     t->axis_x, t->axis_z, t->fog, t->tint);
 
     // Fullscreen ortho: distance grid for side views (top/bottom use the shader ground grid)
     if (s->ortho_mode >= ORTHO_FRONT && s->ortho_mode <= ORTHO_RIGHT) {
@@ -701,25 +664,8 @@ void scene_draw(const scene_t *s) {
         else if (s->ortho_span > 80.0f) spacing = 20.0f;
         else if (s->ortho_span < 20.0f) spacing = 2.0f;
 
-        Color grid_minor, grid_major;
-        switch (s->view_mode) {
-            case VIEW_REZ:
-                grid_minor = (Color){  0, 204, 218,  70 };
-                grid_major = (Color){  0, 204, 218, 180 };
-                break;
-            case VIEW_1988:
-                grid_minor = (Color){ 255, 20, 100,  70 };
-                grid_major = (Color){ 255, 20, 100, 200 };
-                break;
-            case VIEW_SNOW:
-                grid_minor = (Color){ 140, 145, 155, 160 };
-                grid_major = (Color){  50,  55,  65, 220 };
-                break;
-            default: // VIEW_GRID
-                grid_minor = (Color){ 110, 110, 115, 180 };
-                grid_major = (Color){ 170, 170, 175, 220 };
-                break;
-        }
+        Color grid_minor = t->ortho_grid_minor;
+        Color grid_major = t->ortho_grid_major;
         Vector3 center = s->camera.target;
 
         // Grid lines anchored to world origin (multiples of spacing from 0)
@@ -788,13 +734,7 @@ void scene_draw_ortho_ground(const scene_t *s, int screen_w, int screen_h) {
 }
 
 void scene_draw_sky(const scene_t *s) {
-    switch (s->view_mode) {
-        case VIEW_GRID: ClearBackground(GRID_SKY); break;
-        case VIEW_REZ:  ClearBackground(REZ_SKY);   break;
-        case VIEW_SNOW: ClearBackground(SNOW_SKY); break;
-        case VIEW_1988: ClearBackground(SYNTH_SKY); break;
-        default:        ClearBackground(GRID_SKY); break;
-    }
+    ClearBackground(s->theme->sky);
 }
 
 void scene_cleanup(scene_t *s) {

@@ -51,6 +51,7 @@ if(NOT BUILD_TESTING_ONLY)
         src/debug_panel.c
         src/ortho_panel.c
         src/asset_path.c
+        src/theme.c
     )
 
     target_include_directories(mavsim-viewer PRIVATE
@@ -85,6 +86,8 @@ if(NOT BUILD_TESTING_ONLY)
             ${CMAKE_SOURCE_DIR}/fonts $<TARGET_FILE_DIR:mavsim-viewer>/fonts
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_SOURCE_DIR}/textures $<TARGET_FILE_DIR:mavsim-viewer>/textures
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/themes $<TARGET_FILE_DIR:mavsim-viewer>/themes
     )
 
     # Install rules
