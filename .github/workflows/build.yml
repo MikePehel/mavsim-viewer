@@ -46,14 +46,11 @@ jobs:
           path: build/_deps
           key: ${{ runner.os }}-${{ matrix.build_type }}-deps-raylib5.5-${{ hashFiles('CMakeLists.txt') }}
 
-      - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DBUILD_TESTING=ON
-
       - name: Build
-        run: cmake --build build --config ${{ matrix.build_type }}
+        run: make BUILD_TYPE=${{ matrix.build_type }}
 
-      - name: Run tests
-        run: ctest --test-dir build --output-on-failure
+      - name: Test
+        run: make test BUILD_TYPE=${{ matrix.build_type }}
 
   test:
     name: Tests (no raylib)
@@ -68,11 +65,8 @@ jobs:
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DBUILD_TESTING_ONLY=ON
 
-      - name: Build tests
-        run: cmake --build build
-
-      - name: Run tests
-        run: ctest --test-dir build --output-on-failure
+      - name: Build & test
+        run: cmake --build build && ctest --test-dir build --output-on-failure
 
   sanitizers:
     name: ASan + UBSan
@@ -87,8 +81,5 @@ jobs:
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DBUILD_TESTING_ONLY=ON -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
 
-      - name: Build tests
-        run: cmake --build build
-
-      - name: Run tests
-        run: ctest --test-dir build --output-on-failure
+      - name: Build & test
+        run: cmake --build build && ctest --test-dir build --output-on-failure
