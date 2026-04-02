@@ -62,11 +62,8 @@ jobs:
           submodules: true
           lfs: true
 
-      - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DBUILD_TESTING_ONLY=ON
-
       - name: Build & test
-        run: cmake --build build && ctest --test-dir build --output-on-failure
+        run: make test-core
 
   sanitizers:
     name: ASan + UBSan
@@ -78,8 +75,5 @@ jobs:
           submodules: true
           lfs: true
 
-      - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DBUILD_TESTING_ONLY=ON -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
-
       - name: Build & test
-        run: cmake --build build && ctest --test-dir build --output-on-failure
+        run: make sanitize && make test
