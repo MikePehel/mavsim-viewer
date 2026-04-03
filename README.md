@@ -17,13 +17,16 @@ Built with [Raylib](https://www.raylib.com/) and [MAVLink](https://mavlink.io/).
 - **Automatic deconfliction** — detects position conflicts and offers formation, ghost, or grid offset modes
 - **Correlation analysis** — real-time Pearson correlation and RMSE between pinned drones with visual overlays (line, curtain, ribbon)
 - **CUSUM takeoff detection** — automatically detects launch times and aligns multi-drone timelines for synchronized comparison
+- **Frame markers** — drop markers at any point during replay (`B`), add labels (`B` then `L`), and navigate between them
+- **Theme engine** — `.mvt` theme files with drag-and-drop loading and `V` key cycling
 - Multiple vehicle models: quadrotor, hexarotor, fixed-wing, tailsitter, VTOL, rover, ROV
-- Chase and FPV camera modes (press `C` to toggle)
-- Vehicle selection and pinning: TAB cycles, number keys select, Shift+number pins to HUD sidebar
+- Three camera modes: Chase, FPV, and Free (WASDQE fly with shift boost) — press `C` to cycle
+- Vehicle selection and pinning: TAB cycles, 1-9 select, Shift+number pins, two-digit chords for drones 10-16
 - Mouse orbit (left-drag) and FOV zoom (scroll wheel)
-- HUD with compass, telemetry, CONF/PRSN/RMSE badges, and ESTIMATED POSITION warnings
+- HUD with compass, attitude indicator, telemetry, CONF/PRSN/RMSE badges, and ESTIMATED POSITION warnings
 - Orthographic views: sidebar (Top/Front/Right) and fullscreen (Alt+2-7) with 2D trail rendering
-- Three view modes (Grid, Rez, Snow) with per-mode color palettes for drones, trails, and HUD
+- Screen edge indicators for off-screen drones in multi-vehicle mode
+- Theme-driven color palettes for drones, trails, grid, and HUD
 - Cross-platform: macOS, Linux, and Windows supported out of the box thanks to Raylib
 
 ## Install
@@ -48,26 +51,21 @@ sudo dpkg -i mavsim-viewer-*.deb
 #### macOS
 
 ```bash
-# Install build tools
 brew install cmake git
-
 git clone --recursive https://github.com/mavlink/mavsim-viewer.git
 cd mavsim-viewer
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+make release
 ```
 
 #### Linux (Debian/Ubuntu)
 
 ```bash
-# Install build tools and display server dependencies
 sudo apt-get install -y cmake git build-essential \
   libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
 
 git clone --recursive https://github.com/mavlink/mavsim-viewer.git
 cd mavsim-viewer
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+make release
 ```
 
 #### Windows
@@ -76,11 +74,20 @@ cmake --build build
 # Requires Visual Studio with C/C++ workload, CMake, and Git
 git clone --recursive https://github.com/mavlink/mavsim-viewer.git
 cd mavsim-viewer
-cmake -B build
-cmake --build build --config Release
+make release
 ```
 
-The binary will be at `build/Release/mavsim-viewer.exe`.
+The binary will be at `build/mavsim-viewer` (or `build\Release\mavsim-viewer.exe` on Windows).
+
+#### Makefile targets
+
+| Target | Description |
+|---|---|
+| `make` | Debug build (default) |
+| `make release` | Release build |
+| `make test` | Build and run all tests |
+| `make run` | Build and launch the viewer |
+| `make clean` | Remove build directory |
 
 ## Usage
 
@@ -213,41 +220,56 @@ With multiple drones loaded, trail mode 3 (`T` to cycle) renders each drone's tr
 
 ## Controls
 
+Press `?` to show the help overlay in-app.
+
 | Key/Input | Action |
 |---|---|
-| `C` | Toggle camera mode (Chase / FPV) |
-| `V` | Cycle view mode (Grid / Rez / Snow) |
+| **View** | |
+| `C` | Cycle camera mode (Chase / FPV / Free) |
+| `V` | Cycle theme (Grid / Rez / Snow, or drag-and-drop `.mvt` files) |
 | `H` | Toggle HUD visibility |
 | `T` | Cycle trail mode (off / directional / speed ribbon / drone color) |
 | `Shift+T` | Cycle correlation overlay: off / line / curtain (multi-drone) |
 | `G` | Toggle ground track projection |
 | `F` | Toggle terrain texture |
-| `M` | Cycle vehicle model within group (`Shift+M`: all models) |
 | `K` | Toggle classic (red/blue) / modern (yellow/purple) arm colors |
-| `Z` | Toggle axis orientation gizmo |
-| `Ctrl+D` | Toggle debug panel (FPS, frame time, position tier) |
-| `Ctrl+L` | Toggle correlation distance labels |
 | `O` | Toggle orthographic side panel (Top / Front / Right) |
 | `Alt+1` | Return to perspective camera |
 | `Alt+2`-`7` | Fullscreen ortho view (Top / Front / Left / Right / Bottom / Back) |
+| `Ctrl+D` | Toggle debug panel |
+| `?` | Toggle help overlay |
+| **Camera** | |
+| Left-drag | Orbit camera (chase) / look (free) |
+| Scroll wheel | Zoom FOV (perspective) or span (ortho) |
+| `WASDQE` | Fly in free camera mode (Shift: 3x boost) |
 | `Alt+Scroll` | Zoom ortho view span |
 | Right-drag | Pan in ortho mode |
+| **Vehicle** | |
+| `M` | Cycle vehicle model within group (`Shift+M`: all models) |
 | `TAB` | Cycle to next vehicle (clears pins) |
 | `[` / `]` | Previous / next vehicle (clears pins) |
-| `1`-`9` | Select vehicle directly |
+| `1`-`9` | Select vehicle directly (two-digit chords for drones 10-16) |
 | `Shift+1`-`9` | Toggle pin/unpin vehicle to HUD sidebar |
-| Left-drag | Orbit camera (chase mode) |
-| Scroll wheel | Zoom FOV (perspective) or span (ortho) |
+| `Ctrl+L` | Toggle screen edge indicators for off-screen drones |
 | **Replay** | |
-| `Space` | Pause / resume (or restart after end) |
+| `Space` | Pause / resume |
 | `+` / `-` | Increase / decrease playback speed |
-| `←` / `→` | Seek 5s backward / forward (`Shift`: 30s) |
-| `L` | Toggle loop |
+| `←` / `→` | Seek 5s backward / forward |
+| `Shift+←/→` | Frame step (20ms) |
+| `Ctrl+Shift+←/→` | Seek 1s |
+| `L` | Toggle marker labels |
+| `Shift+L` | Toggle loop |
 | `I` | Toggle interpolation |
 | `R` | Restart from beginning |
 | `Y` | Toggle yaw display |
 | `A` | Toggle takeoff time alignment (multi-drone) |
 | `P` | Reopen deconfliction menu (multi-drone) |
+| **Markers** | |
+| `B` | Drop marker at current position |
+| `B` then `L` | Drop marker and open label input |
+| `Shift+B` | Delete current marker |
+| `[` / `]` | Jump to previous / next marker (in replay) |
+| `Shift+[` / `]` | Track drone from marker |
 
 ### View Modes
 
