@@ -187,6 +187,74 @@ static void test_multi_file_independence(void) {
     printf("  PASS multi_file_independence\n");
 }
 
+/* Regression: multi-drone replay crashed because only vehicles[0] was
+   initialized.  The root cause was that data sources beyond index 0 were
+   never created in the replay init loop.  Verify that creating an array
+   of sources (the same pattern main.c uses) gives each one valid,
+   independent state.  */
+static void test_multi_drone_array_init(void) {
+    /* Use all 5 fixture logs to simulate a swarm replay */
+    const char *paths[] = {
+        FIXTURES_DIR "/dde9a24c-34c5-4868-b09c-bd3481ed1029.ulg",
+        FIXTURES_DIR "/6dfd8372-8bb9-4827-8c43-8895f3fe7e7a.ulg",
+        FIXTURES_DIR "/c83373e1-ee62-4e7e-850b-69316e8641a9.ulg",
+        FIXTURES_DIR "/13b99e7f-7cbe-4dc9-aab8-3c1c7b363d54.ulg",
+        FIXTURES_DIR "/1040ff85-42ce-493a-a281-fa3fdebff96e.ulg",
+    };
+    int count = (int)(sizeof(paths) / sizeof(paths[0]));
+
+    data_source_t sources[5];
+    memset(sources, 0, sizeof(sources));
+
+    /* Create all sources (mirrors the loop in main.c) */
+    for (int i = 0; i < count; i++) {
+        int ret = data_source_ulog_create(&sources[i], paths[i]);
+        assert(ret == 0);
+        assert(sources[i].connected);
+        assert(sources[i].impl != NULL);
+        assert(sources[i].playback.duration_s > 0.0f);
+    }
+
+    /* Poll all sources and verify each advances independently */
+    for (int step = 0; step < 100; step++) {
+        for (int i = 0; i < count; i++)
+            data_source_poll(&sources[i], 0.05f);
+    }
+
+    for (int i = 0; i < count; i++) {
+        assert(sources[i].playback.position_s > 0.0f);
+        assert(sources[i].playback.progress > 0.0f);
+        assert(sources[i].state.valid);
+    }
+
+    for (int i = 0; i < count; i++)
+        data_source_close(&sources[i]);
+    printf("  PASS multi_drone_array_init (%d sources)\n", count);
+}
+
+/* Regression: hud_t was stack-allocated without zeroing, so toast_timer
+   contained garbage and rendered uninitialised toast_text (";???").
+   The fix was memset(h, 0, sizeof(*h)) in hud_init().  Since hud_t
+   depends on Raylib types we can't call hud_init() here, but we CAN
+   verify the same pattern on data_source_t: memset + create must leave
+   all playback toast-analogous fields deterministically zeroed.  */
+static void test_zeroed_playback_defaults(void) {
+    data_source_t ds;
+    /* Poison the struct with 0xFF to simulate stack garbage */
+    memset(&ds, 0xFF, sizeof(ds));
+    /* data_source_ulog_create does memset(ds, 0, ...) internally */
+    assert(data_source_ulog_create(&ds, QUAD_LOG) == 0);
+
+    /* Timer/progress fields must be deterministic, not stack garbage */
+    assert(ds.playback.position_s == 0.0f);
+    assert(ds.playback.progress == 0.0f);
+    assert(ds.playback.time_offset_s == 0.0f);
+    assert(ds.playback.paused == false);
+
+    data_source_close(&ds);
+    printf("  PASS zeroed_playback_defaults\n");
+}
+
 int main(void) {
     printf("test_data_source:\n");
     test_create();
@@ -200,6 +268,8 @@ int main(void) {
     test_set_time_offset();
     test_playback_state_fields();
     test_multi_file_independence();
+    test_multi_drone_array_init();
+    test_zeroed_playback_defaults();
     printf("All tests passed.\n");
     return 0;
 }
