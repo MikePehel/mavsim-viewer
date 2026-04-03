@@ -2,9 +2,9 @@
 
 [![Release](https://img.shields.io/github/v/release/PX4/Hawkeye)](https://github.com/PX4/Hawkeye/releases/latest)
 
-Lightweight 3D viewer for MAVLink-based flight simulators. Receives `HIL_STATE_QUATERNION` messages over UDP and renders the vehicle with real-time telemetry.
+Real-time 3D flight visualizer for PX4 — watch live SITL simulations, replay ULog flights, and analyze multi-drone swarms with correlation tracking, takeoff alignment, and deconfliction. Supports up to 16 vehicles simultaneously with ghost overlays, formation views, and frame-by-frame inspection.
 
-Built with [Raylib](https://www.raylib.com/) and [MAVLink](https://mavlink.io/).
+Built with [Raylib](https://www.raylib.com/) and [MAVLink](https://mavlink.io/). Zero dependencies to install — just build and fly.
 
 ![Hawkeye](docs/screenshot.png)
 
