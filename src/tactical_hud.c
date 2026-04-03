@@ -670,12 +670,17 @@ static void tac_draw_gimbal_rings(const hud_t *h, const vehicle_t *vehicles,
     if (h->pinned_count == 0) return;
 
     float ring_y = wy(998, sh);
-    float spacing = wx(51, sw);
+
+    // Fixed size: transport width (50% screen) / 15 max drones = cell width
+    // This gives consistent sizing that fills the transport bar at max capacity
+    float transport_w = sw * 0.5f;
+    float cell_w = transport_w / 15.0f;
+    float r = cell_w * 0.38f;
+    float spacing = cell_w;
     float total_w = (h->pinned_count - 1) * spacing;
     float start_x = sw / 2.0f - total_w / 2.0f;
 
-    float r = ws(18, sw, sh);
-    float fs_id = wy(11, sh);
+    float fs_id = r * 0.6f;
     float tint = 0.5f;
 
     Color base_roll  = (Color){255, 100, 100, 180};
