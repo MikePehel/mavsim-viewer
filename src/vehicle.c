@@ -44,9 +44,9 @@ const vehicle_model_info_t vehicle_models[] = {
     { "models/tailsitter3.obj",    "Tailsitter",  1.0f, -90.0f, 0.0f, 0.0f, GROUP_TAILSITTER,  1,     1.2f },
     { "models/quadfpv9.obj",       "FPV Quad",    0.75f, -90.0f, 0.0f, 0.0f, GROUP_QUAD,        1,     0.3f },
     { "models/hex10.obj",          "Hexarotor",   0.9f, -90.0f, 0.0f,  0.0f, GROUP_HEX,         1,     1.0f },
-    { "models/hexfpv2.obj",        "FPV Hex",     0.85f, -90.0f, 0.0f, 0.0f, GROUP_HEX,         1,     0.3f },
-    { "models/vtol4.obj",          "VTOL",        1.5f, -90.0f, 0.0f, 0.0f, GROUP_VTOL,        1,     2.0f },
-    { "models/rover7.obj",         "Rover",       1.0f, -90.0f, 0.0f,  0.0f, GROUP_ROVER,       2,     0.5f },
+    { "models/hexfpv4.obj",        "FPV Hex",     0.85f, -90.0f, 0.0f, 0.0f, GROUP_HEX,         1,     0.3f },
+    { "models/vtol5.obj",          "VTOL",        1.5f, -90.0f, 0.0f, 0.0f, GROUP_VTOL,        1,     2.0f },
+    { "models/rover8.obj",         "Rover",       1.0f, -90.0f, 0.0f,  0.0f, GROUP_ROVER,       2,     0.5f },
     { "models/rov5.obj",           "ROV",         1.0f, -90.0f, 0.0f, 0.0f, GROUP_ROV,         1,     0.75f },
 };
 const int vehicle_model_count = sizeof(vehicle_models) / sizeof(vehicle_models[0]);
