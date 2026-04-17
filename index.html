@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hawkeye WASM — dev harness</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #0a0c10;
+        color: #e0e4ec;
+    }
+    header {
+        padding: 10px 16px;
+        background: #13161d;
+        border-bottom: 1px solid #23272f;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    header h1 {
+        margin: 0;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+    }
+    header .muted { color: #7a8290; font-size: 11px; }
+    main {
+        display: flex;
+        gap: 16px;
+        padding: 16px;
+        align-items: flex-start;
+    }
+    canvas {
+        display: block;
+        background: #000;
+        border: 1px solid #2a2f3a;
+        border-radius: 4px;
+        outline: none;
+    }
+    .controls {
+        min-width: 260px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+    .card {
+        background: #13161d;
+        border: 1px solid #23272f;
+        border-radius: 4px;
+        padding: 12px;
+    }
+    .card h2 {
+        margin: 0 0 8px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        color: #9aa3b2;
+    }
+    button {
+        background: #1c212b;
+        color: #e0e4ec;
+        border: 1px solid #2a2f3a;
+        border-radius: 3px;
+        padding: 6px 12px;
+        font: inherit;
+        cursor: pointer;
+    }
+    button:hover { background: #23283a; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    input[type=file] { font-size: 11px; }
+    input[type=range] { width: 100%; }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .log {
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 11px;
+        color: #8a93a5;
+        max-height: 200px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+    }
+</style>
+</head>
+<body>
+
+<header>
+    <h1>Hawkeye WASM</h1>
+    <span class="muted">dev harness · not for production</span>
+</header>
+
+<main>
+    <canvas id="hawkeye-canvas" width="960" height="540" tabindex="0"></canvas>
+
+    <div class="controls">
+        <div class="card">
+            <h2>ULog</h2>
+            <input type="file" id="ulog-input" accept=".ulg" multiple />
+        </div>
+
+        <div class="card">
+            <h2>Theme (.mvt)</h2>
+            <input type="file" id="theme-input" accept=".mvt" multiple />
+        </div>
+
+        <div class="card">
+            <h2>Status</h2>
+            <span id="time-display" class="muted" style="font-size:12px; font-family:monospace;">0:00 / 0:00</span>
+        </div>
+
+        <div class="card">
+            <h2>Log</h2>
+            <div class="log" id="log"></div>
+        </div>
+    </div>
+</main>
+
+<script>
+// ------------------------------------------------------------------
+// Dev harness glue. Not shipping code. Assumes hawkeye.js has been
+// emitted next to this file by the emscripten build and is being
+// served by a local HTTP server (python3 -m http.server).
+// ------------------------------------------------------------------
+
+const logEl = document.getElementById('log');
+function log(s) {
+    console.log(s);
+    const line = document.createElement('div');
+    line.textContent = s;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+}
+
+const canvas = document.getElementById('hawkeye-canvas');
+
+const Module = {
+    canvas: canvas,
+    keyboardListeningElement: window,
+    print: (s) => log(s),
+    printErr: (s) => log('[err] ' + s),
+};
+
+let hawkeye_init = null;
+let hawkeye_load_ulog_bytes = null;
+let hawkeye_resize = null;
+let hawkeye_destroy = null;
+let hawkeye_set_playing = null;
+let hawkeye_seek = null;
+let hawkeye_get_duration = null;
+let hawkeye_get_position = null;
+let logDuration = 0;
+
+// Load the emcc-generated module. createHawkeye is the EXPORT_NAME in CMakeLists.
+import('./hawkeye.js').then(mod => {
+    return mod.default(Module);
+}).then(instance => {
+    log('hawkeye.js loaded');
+    hawkeye_init = instance.cwrap('hawkeye_init', 'number', ['string','number','number']);
+    hawkeye_load_ulog_bytes = instance.cwrap('hawkeye_load_ulog_bytes', 'number', ['number','number']);
+    hawkeye_resize = instance.cwrap('hawkeye_resize', null, ['number','number']);
+    hawkeye_destroy = instance.cwrap('hawkeye_destroy', null, []);
+    hawkeye_set_playing = instance.cwrap('hawkeye_set_playing', null, ['number']);
+    hawkeye_seek = instance.cwrap('hawkeye_seek', null, ['number']);
+    hawkeye_get_duration = instance.cwrap('hawkeye_get_duration', 'number', []);
+    hawkeye_get_position = instance.cwrap('hawkeye_get_position', 'number', []);
+
+    const cssW = 960, cssH = 540;
+    const rc = hawkeye_init('#hawkeye-canvas', cssW, cssH);
+    log('hawkeye_init → ' + rc);
+    // hawkeye_init calls emscripten_set_element_css_size internally so the
+    // canvas renders at cssW × cssH in CSS pixels with a DPR-scaled GL
+    // buffer for Retina crispness. No JS-side canvas.style fix needed.
+
+    // Keep a reference to the instance for the file-drop handler
+    window._hawkeye = { instance, heapSet: (bytes) => {
+        const ptr = instance._malloc(bytes.length);
+        instance.HEAPU8.set(bytes, ptr);
+        return ptr;
+    }};
+
+    // Module ready — keyboard input available after clicking canvas
+}).catch(err => {
+    log('load failed: ' + err.message);
+});
+
+// ------------------------------------------------------------------
+// Time display updater — polls position/duration every frame
+// ------------------------------------------------------------------
+
+function fmtTime(s) {
+    if (!isFinite(s) || s < 0) s = 0;
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return m + ':' + (sec < 10 ? '0' : '') + sec;
+}
+
+const timeDisplay = document.getElementById('time-display');
+
+function updateTimeDisplay() {
+    if (hawkeye_get_position && hawkeye_get_duration && logDuration > 0) {
+        const pos = hawkeye_get_position();
+        const dur = logDuration;
+        timeDisplay.textContent = fmtTime(pos) + ' / ' + fmtTime(dur);
+    }
+    requestAnimationFrame(updateTimeDisplay);
+}
+requestAnimationFrame(updateTimeDisplay);
+
+// ------------------------------------------------------------------
+// File input
+// ------------------------------------------------------------------
+
+document.getElementById('ulog-input').addEventListener('change', async (ev) => {
+    const files = Array.from(ev.target.files);
+    if (files.length === 0) return;
+
+    const h = window._hawkeye;
+    if (!h) return;
+
+    log('reading ' + files.length + ' file(s)...');
+
+    // Read all files into byte arrays
+    const fileData = [];
+    for (const file of files) {
+        log('  ' + file.name + ' (' + file.size + ' bytes)');
+        const ab = await file.arrayBuffer();
+        fileData.push(new Uint8Array(ab));
+    }
+
+    if (files.length === 1) {
+        // Single file: use the simple API
+        const ptr = h.heapSet(fileData[0]);
+        const rc = hawkeye_load_ulog_bytes(ptr, fileData[0].length);
+        log('hawkeye_load_ulog_bytes → ' + rc);
+        h.instance._free(ptr);
+    } else {
+        // Multiple files: use the staged 3-step API to avoid pointer-array
+        // issues with WASM memory growth
+        try {
+            const count = fileData.length;
+            const begin = h.instance.cwrap('hawkeye_begin_multi_load', 'number', ['number']);
+            const stage = h.instance.cwrap('hawkeye_stage_ulog', 'number', ['number', 'number', 'number']);
+            const finalize = h.instance.cwrap('hawkeye_finalize_multi_load', 'number', ['number']);
+
+            let rc = begin(count);
+            if (rc !== 0) throw new Error('begin_multi_load failed: ' + rc);
+
+            for (let i = 0; i < count; i++) {
+                log('  staging file ' + i + ' (' + fileData[i].length + ' bytes)...');
+                const ptr = h.heapSet(fileData[i]);
+                if (ptr === 0) throw new Error('malloc failed for file ' + i);
+                rc = stage(i, ptr, fileData[i].length);
+                h.instance._free(ptr);
+                if (rc !== 0) throw new Error('stage_ulog failed for file ' + i);
+            }
+
+            // mode 0 = auto (detect conflicts, default to ghost)
+            rc = finalize(0);
+            log('multi-load (' + count + ' files) → ' + rc);
+        } catch (e) {
+            log('multi-load FAILED: ' + e.message);
+            console.error(e);
+        }
+    }
+
+    canvas.focus();
+
+    if (hawkeye_get_duration) {
+        logDuration = hawkeye_get_duration();
+        log('duration: ' + fmtTime(logDuration));
+    }
+});
+
+// Playback controls are handled by Hawkeye's native HUD (Space, arrows, +/-)
+// No JS-side controls needed.
+
+// ------------------------------------------------------------------
+// Theme (.mvt) drag-drop — mirrors native's IsFileDropped handler
+// ------------------------------------------------------------------
+
+document.getElementById('theme-input').addEventListener('change', async (ev) => {
+    const files = Array.from(ev.target.files);
+    const h = window._hawkeye;
+    if (!h || files.length === 0) return;
+
+    const addTheme = h.instance.cwrap('hawkeye_add_theme_bytes', 'number',
+                                       ['number', 'number', 'string']);
+
+    for (const file of files) {
+        const ab = await file.arrayBuffer();
+        const bytes = new Uint8Array(ab);
+        const ptr = h.heapSet(bytes);
+        const rc = addTheme(ptr, bytes.length, file.name);
+        h.instance._free(ptr);
+        log('theme ' + file.name + ' → ' + rc);
+    }
+    canvas.focus();
+});
+</script>
+
+</body>
+</html>
