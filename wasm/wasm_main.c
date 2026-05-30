@@ -950,8 +950,9 @@ static void frame(void *arg) {
             }
         }
 
-        // A takeoff alignment (main.c:1053)
-        if (IsKeyPressed(KEY_A) && g.vehicle_count > 1) {
+        // Shift+A takeoff alignment (main.c:1054)
+        bool shift_held = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+        if (shift_held && IsKeyPressed(KEY_A) && g.vehicle_count > 1) {
             g.takeoff_aligned = !g.takeoff_aligned;
             const float takeoff_buffer = 5.0f;
             for (int i = 0; i < nrf; i++) {

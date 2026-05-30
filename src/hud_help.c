@@ -70,7 +70,7 @@ void hud_draw_help(Font font_value, Font font_label,
         {"Sh+B",        "Delete current marker"},
         {"[ / ]",       "Jump to prev/next marker"},
         {"Sh+[ / ]",    "Track from marker"},
-        {"A",           "Takeoff alignment"},
+        {"Sh+A",        "Takeoff alignment"},
     };
 
     int counts[3] = {
