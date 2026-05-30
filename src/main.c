@@ -281,7 +281,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // ── Takeoff alignment state (toggled by A key) ──
+    // ── Takeoff alignment state (toggled by Shift+A) ──
     bool takeoff_aligned = false;
     if (is_replay && num_replay_files > 1) {
         // Set multi-file CONF for each source (always available)
@@ -1049,8 +1049,11 @@ int main(int argc, char *argv[]) {
                     markers[i].current = -1;
                 }
             }
-            // A key: toggle takeoff time alignment
-            if (IsKeyPressed(KEY_A) && num_replay_files > 1) {
+            // Shift+A: toggle takeoff time alignment. Modifier-gated so
+            // bare A stays free for the WASDEQ camera-left strafe in scene.c
+            // (without the gate, every camera-left touch flipped auto-align).
+            bool shift_held = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+            if (shift_held && IsKeyPressed(KEY_A) && num_replay_files > 1) {
                 takeoff_aligned = !takeoff_aligned;
                 const float takeoff_buffer = 5.0f;
                 for (int i = 0; i < nrf; i++) {
