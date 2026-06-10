@@ -1267,15 +1267,36 @@ void vehicle_set_ghost_alpha(vehicle_t *v, float alpha) {
 
 void vehicle_draw_correlation_curtain(
     const vehicle_t *va, const vehicle_t *vb,
+    int baseline_a, int baseline_b,
     const theme_t *theme, Vector3 cam_pos) {
     (void)theme;  // colors come from vehicle->color, theme kept for API consistency
-    if (va->trail_count < 2 || vb->trail_count < 2) return;
 
-    int n = va->trail_count < vb->trail_count ? va->trail_count : vb->trail_count;
+    // Effective post-baseline sample counts, capped at the ring capacity.
+    // Once the live trail has rolled past the baseline by more than the
+    // ring length, the baseline is lost and we fall back to drawing the
+    // whole ring (still bounded, still doesn't drag in pre-toggle data
+    // that was never there).
+    int new_a = va->trail_count - baseline_a;
+    int new_b = vb->trail_count - baseline_b;
+    if (new_a < 2 || new_b < 2) return;
+    if (new_a > va->trail_capacity) new_a = va->trail_capacity;
+    if (new_b > vb->trail_capacity) new_b = vb->trail_capacity;
+
+    int n = new_a < new_b ? new_a : new_b;
     if (n < 2) return;
 
-    int start_a = (va->trail_count < va->trail_capacity) ? 0 : va->trail_head;
-    int start_b = (vb->trail_count < vb->trail_capacity) ? 0 : vb->trail_head;
+    // Starting index of the post-baseline window in each ring.
+    // Pre-wrap (trail_count <= capacity): samples live at indices
+    // [0, trail_count); the window starts at trail_count - new_*.
+    // Post-wrap: newest sample is at (head + capacity - 1) % capacity;
+    // window of the last new_* samples starts new_* positions back from
+    // there, i.e. (head + capacity - new_*) % capacity.
+    int start_a = (va->trail_count <= va->trail_capacity)
+        ? (va->trail_count - new_a)
+        : (va->trail_head + va->trail_capacity - new_a) % va->trail_capacity;
+    int start_b = (vb->trail_count <= vb->trail_capacity)
+        ? (vb->trail_count - new_b)
+        : (vb->trail_head + vb->trail_capacity - new_b) % vb->trail_capacity;
 
     Color ca = va->color;
     Color cb = vb->color;
@@ -1284,10 +1305,10 @@ void vehicle_draw_correlation_curtain(
     rlBegin(RL_TRIANGLES);
     for (int i = 1; i < n; i++) {
         // Map index through fractional position for trail length alignment
-        int idx_a0 = (start_a + (int)((float)(i - 1) / n * va->trail_count)) % va->trail_capacity;
-        int idx_a1 = (start_a + (int)((float)i / n * va->trail_count)) % va->trail_capacity;
-        int idx_b0 = (start_b + (int)((float)(i - 1) / n * vb->trail_count)) % vb->trail_capacity;
-        int idx_b1 = (start_b + (int)((float)i / n * vb->trail_count)) % vb->trail_capacity;
+        int idx_a0 = (start_a + (int)((float)(i - 1) / n * new_a)) % va->trail_capacity;
+        int idx_a1 = (start_a + (int)((float)i / n * new_a)) % va->trail_capacity;
+        int idx_b0 = (start_b + (int)((float)(i - 1) / n * new_b)) % vb->trail_capacity;
+        int idx_b1 = (start_b + (int)((float)i / n * new_b)) % vb->trail_capacity;
 
         Vector3 pa0 = va->trail[idx_a0];
         Vector3 pa1 = va->trail[idx_a1];

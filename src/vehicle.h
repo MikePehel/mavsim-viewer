@@ -174,8 +174,14 @@ Color vehicle_marker_color(float roll, float pitch, float vert, float speed,
                            Color drone_color);
 
 // Draw correlation curtain between two vehicles (cross-vehicle overlay).
+// baseline_a/baseline_b: trail_count snapshots taken when curtain mode
+// was entered. Only samples added since then participate in the
+// curtain, so toggling Shift+T to Curtain mid-flight starts the ruled
+// surface from "now" instead of dragging the entire accumulated trail
+// through it. Pass 0/0 to draw the full trails (legacy behavior).
 void vehicle_draw_correlation_curtain(
     const vehicle_t *va, const vehicle_t *vb,
+    int baseline_a, int baseline_b,
     const theme_t *theme, Vector3 cam_pos);
 
 // Draw thick correlation line between two vehicles at current positions.

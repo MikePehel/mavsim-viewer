@@ -436,7 +436,14 @@ int main(int argc, char *argv[]) {
     bool show_ground_track = false;  // ground projection off by default
     bool classic_colors = false;     // K key: toggle classic (red/blue) vs modern (yellow/purple)
     bool show_edge_indicators = true; // Ctrl+L: screen edge drone indicators
-    int corr_mode = 0;               // Shift+T: 0=off, 1=ribbon, 2=line
+    int corr_mode = 0;               // Shift+T: 0=off, 1=line, 2=curtain
+    // Per-vehicle trail_count snapshot at the moment Shift+T entered
+    // curtain mode (corr_mode == 2). vehicle_draw_correlation_curtain
+    // clips to samples added since this baseline, so toggling Curtain
+    // mid-flight always starts the ruled surface from "now" instead of
+    // dragging the whole accumulated trail into it. Trails / ribbons
+    // are unaffected — they keep using the full trail buffer.
+    int curtain_baseline[MAX_VEHICLES] = {0};
     bool show_corr_labels = true;    // Ctrl+L: distance labels in ortho correlation
     bool show_axes = false;          // Z: axis orientation gizmo
     bool insufficient_data[MAX_VEHICLES];  // drones with no position data
@@ -818,10 +825,20 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        // Shift+T: cycle correlation overlay (off → ribbon → line → off)
+        // Shift+T: cycle correlation overlay (off → line → curtain → off)
         if (IsKeyPressed(KEY_T) && (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT))
             && is_replay && num_replay_files > 1) {
             corr_mode = (corr_mode + 1) % 3;
+            // On transition INTO curtain mode, snapshot every active
+            // vehicle's current trail_count. The curtain draw clips to
+            // samples added past this baseline so the surface starts
+            // empty and grows from this moment forward instead of
+            // dragging in pre-toggle trail data.
+            if (corr_mode == 2) {
+                for (int i = 0; i < vehicle_count; i++) {
+                    curtain_baseline[i] = vehicles[i].trail_count;
+                }
+            }
             const char *names[] = { "Correlation Off", "Correlation Line", "Correlation Curtain" };
             hud_toast(&hud, names[corr_mode], 2.0f);
         }
@@ -1190,7 +1207,8 @@ int main(int argc, char *argv[]) {
             ortho_panel_update(&ortho, vehicles[selected].position);
             ortho_panel_render(&ortho, vehicles, vehicle_count,
                                selected, scene.theme,
-                               corr_mode, hud.pinned, hud.pinned_count);
+                               corr_mode, hud.pinned, hud.pinned_count,
+                               curtain_baseline);
         }
 
         // Render
@@ -1285,6 +1303,7 @@ int main(int argc, char *argv[]) {
                             } else if (corr_mode == 2) {
                                 vehicle_draw_correlation_curtain(
                                     &vehicles[selected], &vehicles[pidx],
+                                    curtain_baseline[selected], curtain_baseline[pidx],
                                     scene.theme, scene.camera.position);
                             }
                         }
