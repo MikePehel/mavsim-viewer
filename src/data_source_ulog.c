@@ -1,6 +1,9 @@
 #include "data_source.h"
 #include "ulog_replay.h"
+#include "terrain/terrain_params.h"
+#include "ulog/terrain_params_extract.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -90,6 +93,26 @@ int data_source_ulog_create(data_source_t *ds, const char *filepath) {
         free(ctx);
         return ret;
     }
+
+    /*
+     * Pull SIH_TERR_* out of the log's parameter snapshot and push them
+     * into the shared terrain library. Non-SIH logs return false here;
+     * apply with defaults so the library is in a known flat-baseline
+     * state regardless of which log was loaded previously.
+     */
+    HawkeyeTerrainParams terr;
+    bool from_log = ulog_extract_terrain_params(filepath, &terr);
+    if (!from_log) {
+        terr = hawkeye_terrain_params_default();
+    }
+    hawkeye_terrain_apply_params(&terr);
+
+    /* Mirror the live path's [terrain] applied line (terrain_params_listener.c)
+     * so replay is diagnosable from stdout too — without it a log that renders
+     * flat is indistinguishable from a log whose params never got read. */
+    printf("[terrain] replay: mode=%d amp=%.3f freq=%.4f seed=%d plane=%.3f%s\n",
+           terr.mode, terr.amp, terr.freq, terr.seed, terr.plane_deg,
+           from_log ? "" : " (no SIH_TERR_* in log — flat defaults)");
 
     ds->impl = ctx;
     ds->home = ctx->home;       // pre-scanned home for conflict detection

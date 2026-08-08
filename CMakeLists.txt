@@ -14,12 +14,15 @@ set(MAVLINK_DIR ${CMAKE_SOURCE_DIR}/lib/c_library_v2)
 # determinism-test build paths.
 add_subdirectory(src/terrain)
 
-# Core library: ULog parser + replay (no raylib dependency)
+# Core library: ULog parser + replay + terrain parameter ingestion (no raylib dep)
 add_library(hawkeye-core STATIC
     src/ulog_parser.c
     src/ulog_replay.c
     src/ulog_replay_apply.c
     src/data_source_ulog.c
+    src/terrain/terrain_params.c
+    src/ulog/terrain_params_extract.c
+    src/mavlink/terrain_params_listener.c
 )
 target_include_directories(hawkeye-core PUBLIC src/)
 target_include_directories(hawkeye-core PRIVATE
@@ -27,6 +30,7 @@ target_include_directories(hawkeye-core PRIVATE
     ${MAVLINK_DIR}/common
 )
 target_compile_definitions(hawkeye-core PRIVATE MAVLINK_COMM_NUM_BUFFERS=16)
+target_link_libraries(hawkeye-core PRIVATE hawkeye-terrain)
 if(UNIX AND NOT APPLE)
     target_link_libraries(hawkeye-core PRIVATE m)
 endif()

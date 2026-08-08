@@ -57,3 +57,42 @@ if(TARGET raylib)
     target_compile_definitions(test_theme PRIVATE FIXTURES_DIR="${FIXTURES_DIR}")
     add_test(NAME theme COMMAND test_theme)
 endif()
+
+# Terrain parameter extraction tests. Compiled standalone (does NOT
+# link hawkeye-core) so the test runs before the vendored terrain library is
+# wired into the main build: the test provides its own stub for
+# terrain_set_params(). When the terrain library lands and hawkeye-core picks
+# up these sources, this test will still build standalone — the stub takes
+# precedence at link time within this executable.
+set(TERRAIN_FIXTURES_DIR ${CMAKE_SOURCE_DIR}/tests/terrain/fixtures)
+add_executable(test_ulog_extract
+    terrain/test_ulog_extract.c
+    ${CMAKE_SOURCE_DIR}/src/ulog/terrain_params_extract.c
+    ${CMAKE_SOURCE_DIR}/src/terrain/terrain_params.c
+)
+target_include_directories(test_ulog_extract PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_ulog_extract PRIVATE
+    FIXTURES_DIR="${FIXTURES_DIR}"
+    TERRAIN_FIXTURES_DIR="${TERRAIN_FIXTURES_DIR}"
+)
+add_test(NAME ulog_extract COMMAND test_ulog_extract)
+
+# Live-SIH MAVLink listener tests. Same standalone pattern as
+# test_ulog_extract: compiles the listener + apply skeleton directly with
+# a local terrain_set_params() stub, so the test runs independently of
+# the vendored terrain library being wired into hawkeye-core. Needs the
+# MAVLink common dialect on the include path for mavlink_param_value_t.
+add_executable(test_mavlink_listener
+    terrain/test_mavlink_listener.c
+    ${CMAKE_SOURCE_DIR}/src/mavlink/terrain_params_listener.c
+    ${CMAKE_SOURCE_DIR}/src/terrain/terrain_params.c
+)
+target_include_directories(test_mavlink_listener PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${MAVLINK_DIR}
+    ${MAVLINK_DIR}/common
+)
+target_compile_definitions(test_mavlink_listener PRIVATE
+    MAVLINK_COMM_NUM_BUFFERS=16
+)
+add_test(NAME mavlink_listener COMMAND test_mavlink_listener)
