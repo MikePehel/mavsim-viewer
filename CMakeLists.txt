@@ -8,6 +8,12 @@ option(BUILD_TESTING "Build tests" OFF)
 # MAVLink c_library_v2 (header-only, submodule)
 set(MAVLINK_DIR ${CMAKE_SOURCE_DIR}/lib/c_library_v2)
 
+# Procedural terrain — vendored shared source with PX4 firmware. Builds the
+# static library `hawkeye-terrain` exposing `terrain()` / `terrain_set_params()`
+# etc. via `terrain.h`. See src/terrain/CMakeLists.txt for the standalone /
+# determinism-test build paths.
+add_subdirectory(src/terrain)
+
 # Core library: ULog parser + replay (no raylib dependency)
 add_library(hawkeye-core STATIC
     src/ulog_parser.c

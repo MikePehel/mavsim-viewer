@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hawkeye terrain — WASM determinism harness</title>
+<style>
+  body {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    background: #111;
+    color: #ddd;
+    margin: 0;
+    padding: 24px;
+    line-height: 1.4;
+  }
+  h1 { margin: 0 0 12px; font-size: 18px; color: #fff; }
+  .verdict { padding: 10px 14px; margin: 12px 0; border-radius: 6px; }
+  .pass { background: #143; color: #cfc; border: 1px solid #2a5; }
+  .fail { background: #411; color: #fcc; border: 1px solid #a22; }
+  .info { background: #223; color: #cde; border: 1px solid #357; }
+  pre { background: #1a1a1a; padding: 10px; border-radius: 4px;
+        max-height: 50vh; overflow: auto; }
+  .meta { color: #888; font-size: 12px; }
+  details summary { cursor: pointer; padding: 6px 0; }
+</style>
+</head>
+<body>
+
+<h1>Hawkeye terrain — WASM determinism harness</h1>
+<div class="meta">
+  Loads the wasm32 build of the vendored <code>terrain.c</code>, runs the
+  same 100 fixtures the native test uses, and compares to the reference
+  bit patterns generated on the native host.
+</div>
+
+<div id="status" class="verdict info">Loading WASM module&hellip;</div>
+<pre id="log"></pre>
+
+<details>
+  <summary>Per-input ULP distances (fBm bucket)</summary>
+  <pre id="ulp-detail"></pre>
+</details>
+
+<script type="module">
+import {
+  MAX_ULP_TOLERANCE, parseReferenceText, compareBits, bitsToFloat, hex8,
+} from "./determinism_compare.mjs";
+import createDeterminismTest from "./determinism_test.js";
+
+const statusEl = document.getElementById("status");
+const logEl    = document.getElementById("log");
+const ulpEl    = document.getElementById("ulp-detail");
+
+function log(msg) {
+  logEl.textContent += msg + "\n";
+  // also surface to console for headless / Puppeteer runs
+  console.log(msg);
+}
+
+try {
+  // Single source of truth for the reference: fetch the same
+  // determinism_reference.h the C (#include) and Node (fs) harnesses use,
+  // so there is no inline copy to drift. Served over http — the CI /
+  // Puppeteer runner already hosts this page rather than opening file://.
+  const refResp = await fetch("./determinism_reference.h");
+  if (!refResp.ok) {
+    throw new Error(`could not fetch determinism_reference.h (${refResp.status}); ` +
+                    `serve this page over http rather than file://`);
+  }
+  const REFERENCE_BITS = parseReferenceText(await refResp.text());
+  if (REFERENCE_BITS.length !== 100) {
+    throw new Error(`unexpected reference array length ${REFERENCE_BITS.length} (want 100)`);
+  }
+
+  const Module = await createDeterminismTest();
+  log("[wasm] module loaded");
+
+  const N             = Module._determinism_num_inputs();
+  const numHashExact  = Module._determinism_num_hash_exact();
+  if (N !== REFERENCE_BITS.length) {
+    statusEl.className = "verdict fail";
+    statusEl.textContent = `FAIL: input count mismatch — wasm says ${N}, reference has ${REFERENCE_BITS.length}`;
+    throw new Error("input count mismatch");
+  }
+  log(`[wasm] num_inputs=${N}  hash_exact_count=${numHashExact}`);
+
+  // Allocate a uint32_t[N] in WASM memory, run, copy out.
+  const bytes = N * 4;
+  const ptr   = Module._malloc(bytes);
+  try {
+    Module._determinism_run_into_buffer(ptr);
+    const actual = new Uint32Array(Module.HEAPU8.buffer, ptr, N).slice();
+
+    const r = compareBits(actual, REFERENCE_BITS, numHashExact);
+
+    for (const f of r.hashFailures) {
+      log(`FAIL hash[${f.i}] expected ${hex8(f.expected)} got ${hex8(f.actual)}` +
+          `  (${bitsToFloat(f.expected)} vs ${bitsToFloat(f.actual)})`);
+    }
+    for (const f of r.fbmFailures) {
+      log(`FAIL fbm[${f.i}] ULP=${f.ulp} expected ${hex8(f.expected)} got ${hex8(f.actual)}`);
+    }
+
+    ulpEl.textContent = r.fbmUlps
+      .map(u => `[${u.i}] ULP=${u.ulp}  expected ${bitsToFloat(u.expected)}  got ${bitsToFloat(u.actual)}`)
+      .join("\n");
+
+    log("");
+    log(`[wasm] hash-exact: ${r.hashPass}/${numHashExact} PASS`);
+    log(`[wasm] fbm-drift:  ${r.fbmPass}/${N - numHashExact} PASS` +
+        `  (worst ULP = ${r.worstUlp} at idx ${r.worstIdx}; tolerance ${MAX_ULP_TOLERANCE})`);
+
+    if (r.pass) {
+      statusEl.className = "verdict pass";
+      statusEl.textContent =
+        `PASS — hash-exact bit-equal across native+wasm32; ` +
+        `fbm worst drift ${r.worstUlp} ULP (tolerance ${MAX_ULP_TOLERANCE}).`;
+    } else {
+      statusEl.className = "verdict fail";
+      statusEl.textContent =
+        `FAIL — hash failures=${r.failHash} fbm failures=${r.failFbm} worst ULP=${r.worstUlp}`;
+    }
+    // Expose a machine-readable result for headless harnesses / CI.
+    window.__determinism_result = {
+      pass: r.pass,
+      hash_pass: r.hashPass, hash_total: numHashExact,
+      fbm_pass: r.fbmPass,   fbm_total: N - numHashExact,
+      worst_ulp: r.worstUlp, worst_idx: r.worstIdx,
+    };
+  } finally {
+    Module._free(ptr);
+  }
+} catch (err) {
+  statusEl.className = "verdict fail";
+  statusEl.textContent = `FAIL — ${err}`;
+  log(String(err));
+  if (err && err.stack) log(err.stack);
+}
+</script>
+
+</body>
+</html>
