@@ -68,17 +68,22 @@ if(NOT BUILD_TESTING_ONLY)
         src/theme.c
         src/tactical_hud.c
         src/hud_annunciators.c
+        src/terrain/terrain_params.c
+        src/terrain/terrain_renderer.c
+        src/obstacles/wall_renderer.c
     )
 
     target_include_directories(hawkeye PRIVATE
         ${MAVLINK_DIR}
         ${MAVLINK_DIR}/common
+        ${CMAKE_SOURCE_DIR}/src/terrain
+        ${CMAKE_SOURCE_DIR}/src/terrain_sdf
     )
 
     # Need 16 MAVLink parse channels for multi-vehicle support
     target_compile_definitions(hawkeye PRIVATE MAVLINK_COMM_NUM_BUFFERS=16)
 
-    target_link_libraries(hawkeye PRIVATE raylib hawkeye-core)
+    target_link_libraries(hawkeye PRIVATE raylib hawkeye-core hawkeye-terrain)
 
     if(APPLE)
         target_link_libraries(hawkeye PRIVATE
@@ -99,6 +104,8 @@ if(NOT BUILD_TESTING_ONLY)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_SOURCE_DIR}/shaders $<TARGET_FILE_DIR:hawkeye>/shaders
         COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/src/terrain/shaders $<TARGET_FILE_DIR:hawkeye>/shaders
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_SOURCE_DIR}/fonts $<TARGET_FILE_DIR:hawkeye>/fonts
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_SOURCE_DIR}/textures $<TARGET_FILE_DIR:hawkeye>/textures
@@ -116,6 +123,8 @@ if(NOT BUILD_TESTING_ONLY)
     install(DIRECTORY models/ DESTINATION ${CMAKE_INSTALL_DATADIR}/hawkeye/models
             FILES_MATCHING PATTERN "*.obj" PATTERN "*.mtl" PATTERN "*.glb")
     install(DIRECTORY shaders/ DESTINATION ${CMAKE_INSTALL_DATADIR}/hawkeye/shaders
+            FILES_MATCHING PATTERN "*.vs" PATTERN "*.fs")
+    install(DIRECTORY src/terrain/shaders/ DESTINATION ${CMAKE_INSTALL_DATADIR}/hawkeye/shaders
             FILES_MATCHING PATTERN "*.vs" PATTERN "*.fs")
     install(DIRECTORY fonts/ DESTINATION ${CMAKE_INSTALL_DATADIR}/hawkeye/fonts
             FILES_MATCHING PATTERN "*.ttf")

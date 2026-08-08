@@ -15,6 +15,9 @@
 #include "raylib.h"
 #include "raymath.h"
 #include "data_source.h"
+#include "terrain/terrain_params.h"
+#include "terrain/terrain_renderer.h"
+#include "ulog/terrain_params_extract.h"
 #include "vehicle.h"
 #include "scene.h"
 #include "hud.h"
@@ -48,6 +51,8 @@ static void print_usage(const char *prog) {
     printf("  --ghost <file1.ulg> [file2.ulg ...]   Ghost mode replay\n");
     printf("  -w <width>     Window width (default: 1280)\n");
     printf("  -h <height>    Window height (default: 720)\n");
+    printf("  --terrain      Force fBm terrain on (--terrain-amp/-freq/-seed to shape it)\n");
+    printf("  --walls        Force the procedural wall lattice on (uses --terrain-seed)\n");
 }
 
 /* Thin wrapper: delegates to the testable inline in ui_logic.h */
@@ -160,6 +165,25 @@ int main(int argc, char *argv[]) {
     int num_replay_files = 0;
     bool ghost_mode = false;
 
+    // --terrain override (for replays whose ULogs lack SIH_TERR_* params,
+    // e.g. logs from a stock PX4 build without the terrain patch). When set,
+    // these values override whatever each ULog's params snapshot says AFTER
+    // all data sources have been created.
+    bool terrain_override = false;
+    bool walls_override = false;     // --walls: same override, WALLS mode
+    float terrain_amp = 60.0f;       // metres
+    float terrain_freq = 0.003f;     // 1/m
+    int   terrain_oct = 6;
+    float terrain_hurst = 0.7f;
+    float terrain_erosion = 1.0f;
+    int   terrain_seed = 42;
+    // Track which terrain fields the user EXPLICITLY set on the CLI, so a bare
+    // --terrain (force-on) does not clobber a SIH log's own seed/amp/freq with
+    // these defaults. Only explicitly-passed fields override the log snapshot.
+    bool terrain_amp_set = false;
+    bool terrain_freq_set = false;
+    bool terrain_seed_set = false;
+
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-udp") == 0 && i + 1 < argc) {
             base_port = (uint16_t)atoi(argv[++i]);
@@ -201,6 +225,22 @@ int main(int argc, char *argv[]) {
                 }
                 replay_paths[num_replay_files++] = argv[++i];
             }
+        } else if (strcmp(argv[i], "--terrain") == 0) {
+            terrain_override = true;
+        } else if (strcmp(argv[i], "--walls") == 0) {
+            walls_override = true;
+        } else if (strcmp(argv[i], "--terrain-amp") == 0 && i + 1 < argc) {
+            terrain_override = true;
+            terrain_amp = (float)atof(argv[++i]);
+            terrain_amp_set = true;
+        } else if (strcmp(argv[i], "--terrain-freq") == 0 && i + 1 < argc) {
+            terrain_override = true;
+            terrain_freq = (float)atof(argv[++i]);
+            terrain_freq_set = true;
+        } else if (strcmp(argv[i], "--terrain-seed") == 0 && i + 1 < argc) {
+            terrain_override = true;
+            terrain_seed = atoi(argv[++i]);
+            terrain_seed_set = true;
         } else if (strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -213,6 +253,13 @@ int main(int argc, char *argv[]) {
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
     InitWindow(win_w, win_h, "Hawkeye");
     SetTargetFPS(60);
+
+    // Fan terrain parameter applies out to the renderer's local cache.
+    // The ULog and live-MAVLink ingestion sites both call
+    // hawkeye_terrain_apply_params(); registering the renderer's apply
+    // here once means the renderer stays in sync without each ingestion
+    // site needing a direct dependency on the renderer.
+    hawkeye_terrain_set_apply_callback(terrain_renderer_apply_params);
 
     // Init data sources
     data_source_t sources[MAX_VEHICLES];
@@ -238,10 +285,59 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    // CLI terrain override: data_source_ulog_create() applies each ULog's
+    // (often-empty) SIH_TERR_* snapshot, which leaves the renderer disabled
+    // on stock-PX4 logs. Re-applying after all sources load lets the user
+    // force terrain on for visual replay regardless of what the logs say.
+    if (terrain_override || walls_override) {
+        /* tri-state: --terrain sets TERRAIN mode (fBm hills),
+         * --walls sets WALLS mode (the procedural lattice). The modes are
+         * mutually exclusive; --walls wins if both are passed. Walls are
+         * placed from the seed alone, so --terrain-amp/freq are inert in
+         * WALLS mode. oct/hurst/erosion stay hard-coded as deep noise
+         * internals; their CLI flags are preserved for backward
+         * command-line compat but silently ignored. */
+        (void)terrain_oct; (void)terrain_hurst; (void)terrain_erosion;
+
+        /* Base the override on the log's OWN SIH_TERR_* snapshot when it has
+         * one, so a bare --terrain (force-on) renders the exact world the
+         * drone actually flew instead of clobbering it with the CLI defaults
+         * (amp=60, freq=0.003, seed=42 — a different seed *and* 3x amplitude,
+         * which paints phantom hills under a vehicle that flew flat/valley
+         * terrain). Only fields the user EXPLICITLY passed override the log.
+         * Stock-PX4 logs (no SIH_TERR_EN) have no snapshot, so fall back to
+         * the CLI values, preserving the original "force terrain on" intent. */
+        HawkeyeTerrainParams t;
+        bool from_log = false;
+        if (num_replay_files > 0) {
+            HawkeyeTerrainParams logp;
+            if (ulog_extract_terrain_params(replay_paths[0], &logp)) {
+                t = logp;
+                from_log = true;
+            }
+        }
+        if (!from_log) {
+            t = hawkeye_terrain_params_default();
+            t.amp  = terrain_amp;
+            t.freq = terrain_freq;
+            t.seed = terrain_seed;
+        }
+        t.mode = walls_override ? HAWKEYE_TERRAIN_MODE_WALLS
+                                : HAWKEYE_TERRAIN_MODE_TERRAIN;
+        if (terrain_amp_set)  t.amp  = terrain_amp;
+        if (terrain_freq_set) t.freq = terrain_freq;
+        if (terrain_seed_set) t.seed = terrain_seed;
+        hawkeye_terrain_apply_params(&t);
+        printf("[terrain] CLI override applied: mode=%s amp=%.2f freq=%.4f seed=%d (source=%s)\n",
+               walls_override ? "WALLS" : "TERRAIN",
+               t.amp, t.freq, t.seed, from_log ? "log-snapshot+explicit-CLI" : "CLI-defaults");
+    }
+
     // Init vehicles
     // Init scene first (provides lighting shader for vehicles)
     scene_t scene;
     scene_init(&scene);
+
 
     vehicle_t vehicles[MAX_VEHICLES];
     corr_state_t corr[MAX_VEHICLES];
@@ -436,7 +532,7 @@ int main(int argc, char *argv[]) {
     bool show_ground_track = false;  // ground projection off by default
     bool classic_colors = false;     // K key: toggle classic (red/blue) vs modern (yellow/purple)
     bool show_edge_indicators = true; // Ctrl+L: screen edge drone indicators
-    int corr_mode = 0;               // Shift+T: 0=off, 1=ribbon, 2=line
+    int corr_mode = 0;               // Shift+T: 0=off, 1=line, 2=curtain
     bool show_corr_labels = true;    // Ctrl+L: distance labels in ortho correlation
     bool show_axes = false;          // Z: axis orientation gizmo
     bool insufficient_data[MAX_VEHICLES];  // drones with no position data
@@ -818,7 +914,7 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        // Shift+T: cycle correlation overlay (off → ribbon → line → off)
+        // Shift+T: cycle correlation overlay (off → line → curtain → off)
         if (IsKeyPressed(KEY_T) && (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT))
             && is_replay && num_replay_files > 1) {
             corr_mode = (corr_mode + 1) % 3;
@@ -1402,7 +1498,9 @@ int main(int argc, char *argv[]) {
                                  vehicle_count, active_count, total_trail,
                                  vehicles[selected].position,
                                  sources[selected].ref_rejected,
-                                 vehicle_tier[selected]);
+                                 vehicle_tier[selected],
+                                 scene.ground_tex_on,
+                                 scene.terrain_shading_mode);
             }
 
             // Ortho panel overlay (sidebar in Console mode; tactical draws its own insets)

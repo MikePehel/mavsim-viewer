@@ -1,5 +1,6 @@
 #include "debug_panel.h"
 #include "theme.h"
+#include "terrain/terrain_renderer.h"
 #include "rlgl.h"
 #include <stdio.h>
 #include <math.h>
@@ -71,7 +72,8 @@ void debug_panel_draw(const debug_panel_t *d, int screen_w, int screen_h,
                       const theme_t *theme, Font font,
                       int vehicle_count, int active_count,
                       int total_trail_points, Vector3 vehicle_pos,
-                      bool ref_rejected, int position_tier)
+                      bool ref_rejected, int position_tier,
+                      bool terrain_solid_mode, int terrain_shading_mode)
 {
     if (!d->visible) return;
 
@@ -107,6 +109,10 @@ void debug_panel_draw(const debug_panel_t *d, int screen_w, int screen_h,
     total_h += line_h * 2 + graph_h + line_h;          // Frametime
     total_h += section_gap;
     total_h += line_h * 3;                               // Render
+    total_h += section_gap;
+    total_h += line_h * 5;                               // Terrain (TERRAIN block below adds 4 more lines than this estimate; safe slack)
+    total_h += section_gap;
+    total_h += line_h * 4;                               // Shading
     total_h += section_gap;
     total_h += line_h * 3;                               // Memory
     total_h += section_gap;
@@ -205,6 +211,78 @@ void debug_panel_draw(const debug_panel_t *d, int screen_w, int screen_h,
     snprintf(buf, sizeof(buf), "Trail pts   %d", total_trail_points);
     DrawTextEx(font, buf, (Vector2){cx, cy}, fs, 0, text_col);
     cy += line_h;
+
+    cy += section_gap;
+
+    // --- TERRAIN ---
+    // per-frame mesh stats from the clipmap renderer. Counters are
+    // reset at the top of every terrain_renderer_draw() call, so values
+    // here reflect the most recently completed frame's work.
+    DrawTextEx(font, "TERRAIN", (Vector2){cx, cy}, fs_title, 0, accent);
+    cy += line_h;
+
+    terrain_render_stats_t ts;
+    terrain_renderer_get_stats(&ts);
+
+    snprintf(buf, sizeof(buf), "Tris        %d", ts.tris_drawn_total);
+    DrawTextEx(font, buf, (Vector2){cx, cy}, fs, 0, text_col);
+    cy += line_h;
+
+    // Per-ring breakdown: show up to the first two rings (current layout)
+    // + billboard. Compact form keeps the panel readable at narrow widths.
+    if (ts.num_rings >= 2) {
+        snprintf(buf, sizeof(buf), "Per ring    %d / %d + bb %d",
+                 ts.tris_per_ring[0], ts.tris_per_ring[1], ts.tris_billboard);
+    } else if (ts.num_rings == 1) {
+        snprintf(buf, sizeof(buf), "Per ring    %d + bb %d",
+                 ts.tris_per_ring[0], ts.tris_billboard);
+    } else {
+        snprintf(buf, sizeof(buf), "Per ring    (terrain off)");
+    }
+    DrawTextEx(font, buf, (Vector2){cx, cy}, fs, 0, text_col);
+    cy += line_h;
+
+    snprintf(buf, sizeof(buf), "Patches     %d drawn %d culled",
+             ts.patches_drawn, ts.patches_culled);
+    DrawTextEx(font, buf, (Vector2){cx, cy}, fs, 0, text_col);
+    cy += line_h;
+
+    snprintf(buf, sizeof(buf), "HM evals    %d", ts.heightmap_evals);
+    DrawTextEx(font, buf, (Vector2){cx, cy}, fs, 0, text_col);
+    cy += line_h;
+
+    cy += section_gap;
+
+    // --- SHADING ---
+    // Current solid-mode shading variant + per-mode cost descriptor so
+    // you can compare aesthetics ↔ cost when cycling with SHIFT+F. The
+    // numbers are static order-of-magnitude estimates (extra texture
+    // lookups + extra ALU vs the bare normal recomputation); they don't
+    // reflect runtime measurement.
+    DrawTextEx(font, "SHADING", (Vector2){cx, cy}, fs_title, 0, accent);
+    cy += line_h;
+
+    if (!terrain_solid_mode) {
+        snprintf(buf, sizeof(buf), "wireframe (F=solid)");
+        DrawTextEx(font, buf, (Vector2){cx, cy}, fs, 0, dim_col);
+        cy += line_h * 3;
+    } else {
+        int m = terrain_shading_mode;
+        if (m < 0 || m >= TERRAIN_SHADING_MODE_COUNT) m = 0;
+        snprintf(buf, sizeof(buf), "Mode %d/%d   %s",
+                 m, TERRAIN_SHADING_MODE_COUNT - 1,
+                 TERRAIN_SHADING_MODE_NAMES[m]);
+        DrawTextEx(font, buf, (Vector2){cx, cy}, fs, 0, text_col);
+        cy += line_h;
+        snprintf(buf, sizeof(buf), "Look        %s",
+                 TERRAIN_SHADING_MODE_LOOK[m]);
+        DrawTextEx(font, buf, (Vector2){cx, cy}, fs, 0, dim_col);
+        cy += line_h;
+        snprintf(buf, sizeof(buf), "Cost        %s",
+                 TERRAIN_SHADING_MODE_COST[m]);
+        DrawTextEx(font, buf, (Vector2){cx, cy}, fs, 0, dim_col);
+        cy += line_h;
+    }
 
     cy += section_gap;
 

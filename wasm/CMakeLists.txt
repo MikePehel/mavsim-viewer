@@ -97,6 +97,23 @@ add_executable(hawkeye
     ${HAWKEYE_SRC}/theme.c
     ${HAWKEYE_SRC}/asset_path.c
 
+    # Procedural-terrain renderer (clipmap rings + far-horizon billboard) +
+    # the vendored shared terrain function + parameter-apply shim. scene.c
+    # calls into terrain_renderer_{init,draw,shutdown} so these three TUs
+    # are link-required for the WASM build, mirroring the native CMake
+    # `add_subdirectory(src/terrain) + hawkeye-terrain` + per-source
+    # additions to the executable.
+    ${HAWKEYE_SRC}/terrain/terrain.c
+    ${HAWKEYE_SRC}/terrain/terrain_params.c
+    ${HAWKEYE_SRC}/terrain/terrain_renderer.c
+
+    # SIH_TERR_* extractor's _from_buffer variant, called by
+    # hawkeye_stage_ulog so a SIH log loaded via the JS bytes API
+    # flips the renderer's local `enabled` true and terrain actually
+    # appears. The file-path variant in the same TU is unused by WASM
+    # but the linker drops it as dead code.
+    ${HAWKEYE_SRC}/ulog/terrain_params_extract.c
+
     # HUD subsystem — shared with native
     ${HAWKEYE_SRC}/hud.c
     ${HAWKEYE_SRC}/hud_help.c
@@ -117,8 +134,19 @@ target_include_directories(hawkeye PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}        # wasm/wasm_api.h
     ${HAWKEYE_SRC}                     # src/*.h (type-only includes)
     ${HAWKEYE_SRC}/wasm                # src/wasm/*.h
+    ${HAWKEYE_SRC}/terrain             # terrain.h, terrain_params.h, terrain_renderer.h
     ${HAWKEYE_ROOT}/lib/c_library_v2
     ${HAWKEYE_ROOT}/lib/c_library_v2/common
+)
+
+# Match the native build's `-ffp-contract=off` for the vendored terrain
+# source: cross-platform determinism PASS depends on FMA
+# fusion being disabled. Apple Silicon native + emcc both default to
+# fused FMA which produces ~1 ULP drift per fbm octave; turning it off
+# matches Cortex-M7 firmware semantics and gives a byte-exact match.
+set_source_files_properties(
+    ${HAWKEYE_SRC}/terrain/terrain.c
+    PROPERTIES COMPILE_OPTIONS "-ffp-contract=off"
 )
 
 target_compile_definitions(hawkeye PRIVATE MAVLINK_COMM_NUM_BUFFERS=16)
@@ -143,6 +171,7 @@ target_link_options(hawkeye PRIVATE
     "-sALLOW_TABLE_GROWTH=1"
     "-sSTACK_SIZE=1MB"
     "SHELL:--preload-file ${HAWKEYE_ROOT}/shaders@shaders"
+    "SHELL:--preload-file ${HAWKEYE_SRC}/terrain/shaders@shaders"
     "SHELL:--preload-file ${HAWKEYE_ROOT}/models@models"
     "SHELL:--preload-file ${HAWKEYE_ROOT}/fonts@fonts"
     "SHELL:--preload-file ${HAWKEYE_ROOT}/textures@textures"

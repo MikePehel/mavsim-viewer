@@ -22,6 +22,7 @@ void debug_panel_draw(const debug_panel_t *d, int screen_w, int screen_h,
                       const theme_t *theme, Font font,
                       int vehicle_count, int active_count,
                       int total_trail_points, Vector3 vehicle_pos,
-                      bool ref_rejected, int position_tier);
+                      bool ref_rejected, int position_tier,
+                      bool terrain_solid_mode, int terrain_shading_mode);
 
 #endif

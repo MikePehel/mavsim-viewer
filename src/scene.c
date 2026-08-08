@@ -1,6 +1,9 @@
 #include "scene.h"
 #include "theme.h"
 #include "asset_path.h"
+#include "terrain/terrain_renderer.h"
+#include "obstacles/wall_renderer.h"
+#include "mavlink/terrain_params_listener.h"
 #include "raymath.h"
 #include "rlgl.h"
 #include <stdlib.h>
@@ -106,6 +109,35 @@ static float gtex_voronoi_f1(float u, float v, int cells) {
 
 static float clampf(float v, float lo, float hi) {
     return v < lo ? lo : (v > hi ? hi : v);
+}
+
+// Clamp a colour's perceived luminance (Rec. 709) into [lo, hi] by scaling
+// all RGB channels by a uniform factor. This preserves hue and saturation
+// ratios (only brightness changes), so dark themes (theme.ground near-black,
+// e.g. 1988 blue, rez magenta) keep their chromatic character when boosted,
+// instead of desaturating toward white as a mix-toward-white approach does.
+// If scaling up would clip a channel above 1.0, we accept the clip — the
+// result is still meaningfully brighter and the lost luminance is bounded.
+static Color clamp_luminance(Color c, float lo, float hi) {
+    float r = c.r / 255.0f;
+    float g = c.g / 255.0f;
+    float b = c.b / 255.0f;
+    float y = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+    float scale = 1.0f;
+    if (y > 1e-4f && y < lo) {
+        scale = lo / y;
+    } else if (y > hi) {
+        scale = hi / y;
+    }
+    r = clampf(r * scale, 0.0f, 1.0f);
+    g = clampf(g * scale, 0.0f, 1.0f);
+    b = clampf(b * scale, 0.0f, 1.0f);
+    return (Color){
+        (unsigned char)(r * 255.0f + 0.5f),
+        (unsigned char)(g * 255.0f + 0.5f),
+        (unsigned char)(b * 255.0f + 0.5f),
+        c.a
+    };
 }
 
 #define GTEX_TILE      16     // individual tile size
@@ -278,6 +310,7 @@ void scene_init(scene_t *s) {
     s->loc_groundTex  = GetShaderLocation(s->grid_shader, "groundTex");
     s->loc_colTint    = GetShaderLocation(s->grid_shader, "colTint");
     s->loc_camPos     = GetShaderLocation(s->grid_shader, "camPos");
+    s->loc_lineAlphaMul = GetShaderLocation(s->grid_shader, "lineAlphaMul");
 
     // Load terrain texture from pre-baked PNG
     double t0 = GetTime();
@@ -305,6 +338,8 @@ void scene_init(scene_t *s) {
     printf("Terrain texture: %dx%d loaded in %.1fms\n",
            s->ground_tex.width, s->ground_tex.height, (GetTime() - t0) * 1000.0);
     s->ground_tex_on = false;
+    s->terrain_shading_mode = 0;  /* default to Curvature AO */
+    terrain_renderer_set_shading_mode(s->terrain_shading_mode);
 
     Mesh grid_mesh = GenMeshPlane(GROUND_SIZE * 2, GROUND_SIZE * 2, 100, 100);
     s->grid_plane = LoadModelFromMesh(grid_mesh);
@@ -328,6 +363,8 @@ void scene_init(scene_t *s) {
     int loc_ghost = GetShaderLocation(s->lighting_shader, "ghostAlpha");
     float ghost_default = 1.0f;
     SetShaderValue(s->lighting_shader, loc_ghost, &ghost_default, SHADER_UNIFORM_FLOAT);
+
+    terrain_renderer_init();
 }
 
 static void update_chase_camera(scene_t *s, Vector3 pos) {
@@ -532,8 +569,23 @@ void scene_handle_input(scene_t *s) {
     }
 
     if (IsKeyPressed(KEY_F)) {
-        s->ground_tex_on = !s->ground_tex_on;
-        printf("Terrain: %s\n", s->ground_tex_on ? "ON" : "OFF");
+        if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) {
+            /* SHIFT+F cycles shading mode WITHIN the solid path.
+             * Auto-enables solid if you're in wireframe — otherwise the
+             * cycle would be invisible. */
+            if (!s->ground_tex_on) s->ground_tex_on = true;
+            s->terrain_shading_mode =
+                (s->terrain_shading_mode + 1) % TERRAIN_SHADING_MODE_COUNT;
+            terrain_renderer_set_shading_mode(s->terrain_shading_mode);
+            printf("Shading: %d %s (%s, %s)\n",
+                   s->terrain_shading_mode,
+                   TERRAIN_SHADING_MODE_NAMES[s->terrain_shading_mode],
+                   TERRAIN_SHADING_MODE_LOOK [s->terrain_shading_mode],
+                   TERRAIN_SHADING_MODE_COST [s->terrain_shading_mode]);
+        } else {
+            s->ground_tex_on = !s->ground_tex_on;
+            printf("Terrain: %s\n", s->ground_tex_on ? "ON" : "OFF");
+        }
     }
 
     if (IsKeyPressed(KEY_V)) {
@@ -671,9 +723,29 @@ static void draw_shader_grid(const scene_t *s,
     SetShaderValue(s->grid_shader, s->loc_spacing, &spacing, SHADER_UNIFORM_FLOAT);
     SetShaderValue(s->grid_shader, s->loc_majorEvery, &majorEvery, SHADER_UNIFORM_FLOAT);
     SetShaderValue(s->grid_shader, s->loc_axisWidth, &axisWidth, SHADER_UNIFORM_FLOAT);
-    // Terrain texture toggle
+    /*
+     * Terrain texture toggle. Toon shading (mode 1) intentionally
+     * suppresses the procedural ground texture so the terrain reads
+     * as flat blocks of colour — but the GRID LINES still draw,
+     * because they come from this same grid shader regardless of
+     * texOn. Other shading modes keep the texture on whenever
+     * ground_tex_on is true.
+     */
     int texOn = s->ground_tex_on ? 1 : 0;
+    if (s->ground_tex_on && s->terrain_shading_mode == 1) {
+        texOn = 0;
+    }
     SetShaderValue(s->grid_shader, s->loc_texEnabled, &texOn, SHADER_UNIFORM_INT);
+
+    /*
+     * Fade the grid lines to 25 % when toon is active so the stylized
+     * terrain reads as the dominant surface. Other modes get full-
+     * strength lines.
+     */
+    float lineAlphaMul =
+        (s->ground_tex_on && s->terrain_shading_mode == 1) ? 0.33f : 1.0f;
+    SetShaderValue(s->grid_shader, s->loc_lineAlphaMul, &lineAlphaMul,
+                   SHADER_UNIFORM_FLOAT);
     if (texOn) {
         rlActiveTextureSlot(1);
         rlEnableTexture(s->ground_tex.id);
@@ -701,6 +773,66 @@ void scene_draw(const scene_t *s) {
     const theme_t *t = s->theme;
     draw_shader_grid(s, t->ground, t->grid_minor, t->grid_major,
                      t->axis_x, t->axis_z, t->tint);
+
+    // push the active theme's wireframe colours.
+    //   wireA = low-elevation line  <- theme.grid_minor
+    //   wireB = high-elevation line <- theme.hud_highlight (1988 theme only;
+    //                                  other themes fall back to grid_minor so
+    //                                  the gradient collapses to a single colour)
+    //   fill  <- theme.ground
+    //   fog   <- theme.fog
+    // The 1988 theme has grid_minor=magenta (#FF1464) and hud_highlight=cyan
+    // (#15BEFE), which gives a magenta→cyan elevation gradient. All
+    // other built-in themes have hud_highlight set to a contrasty accent but
+    // we want a single uniform line colour there, so we explicitly pin both
+    // endpoints to grid_minor unless 1988 is active.
+    Color wireA = t->grid_minor;
+    Color wireB = s->theme_1988_active ? t->hud_highlight : t->grid_minor;
+    // For solid mode ( Lambertian path) the fillColor uniform doubles
+    // as the lit base color. theme.ground varies wildly across themes — near
+    // black for dark themes (1988, rez) and near white for light themes (snow)
+    // — so using it raw produces either invisible terrain (Y * lambert ≈ 0)
+    // or blown-out highlights (Y > 1 with ambient). Clamp the luminance into
+    // a visible band that still has room for Lambertian falloff and ambient.
+    // Hue/saturation are preserved as much as possible via mix-toward-white
+    // when too dark / mix-toward-black when too bright. No .mvt schema change
+    // — purely derived from the existing theme.ground slot at runtime.
+    // Wireframe mode keeps theme.ground untouched for its dark fill.
+    Color fill = s->ground_tex_on ? clamp_luminance(t->ground, 0.30f, 0.65f)
+                                  : t->ground;
+    terrain_renderer_set_theme_colors(wireA, wireB, fill, t->fog);
+    // F-key (handled in scene_handle_input) toggles
+    // s->ground_tex_on. When true the terrain renders solid Lambertian
+    // in theme.ground (the same fillColor the wireframe path uses for
+    // its dark fill); when false the wireframe path runs. The grid
+    // pattern is provided by the grid_plane below the terrain mesh —
+    // the terrain mesh itself is intentionally untextured in solid
+    // mode. Solid mode takes precedence over the elevation gradient.
+    /*
+     * tri-state gating. The terrain mesh draws when:
+     *   - mode == TERRAIN (fBm hills via SIH_TERR_AMP), OR
+     *   - plane_deg != 0 (planar slope, honoured in any mode)
+     * In OFF and WALLS modes (with plane = 0) the heightfield is flat
+     * and just duplicates Hawkeye's grid floor — skip the draw.
+     */
+    const HawkeyeTerrainParams *tp = hawkeye_terrain_current_params();
+    bool draw_terrain_mesh =
+        (tp->mode == HAWKEYE_TERRAIN_MODE_TERRAIN && tp->amp > 0.0f) ||
+        tp->plane_deg != 0.0f;
+    if (draw_terrain_mesh) {
+        terrain_renderer_set_solid_mode(s->ground_tex_on);
+        terrain_renderer_draw(s->camera);
+    }
+
+    /* Procedural wall lattice — rendered only in WALLS mode.
+     * The seed has already flowed into terrain_set_params()
+     * via the apply chain, so scene_wall_at_cell() produces the same
+     * layout PX4 simulated.
+     *
+     * Walls render in both wireframe and solid terrain modes — they're
+     * obstacles, not part of the heightmap. */
+    bool draw_walls = (tp->mode == HAWKEYE_TERRAIN_MODE_WALLS);
+    wall_renderer_draw(draw_walls, t);
 
     // Fullscreen ortho: distance grid for side views (top/bottom use the shader ground grid)
     if (s->ortho_mode >= ORTHO_FRONT && s->ortho_mode <= ORTHO_RIGHT) {
@@ -784,6 +916,7 @@ void scene_draw_sky(const scene_t *s) {
 }
 
 void scene_cleanup(scene_t *s) {
+    terrain_renderer_shutdown();
     UnloadTexture(s->ground_tex);
     UnloadModel(s->grid_plane);
     UnloadShader(s->grid_shader);

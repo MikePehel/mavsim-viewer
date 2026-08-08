@@ -15,6 +15,11 @@ android/.idea/workspace.xml
 android/.claude/
 android/.idea/*
 
+# Capture-session ULogs. tests/terrain/fixtures/sih_terrain_on.ulg IS tracked
+# (test_ulog_extract + integration_smoke read it). These four are unreferenced
+# leftovers from the 2026-05-24 capture run, ~124 MB combined.
+tests/terrain/fixtures/sih_phase*.ulg
+
 # Docs site
 node_modules/
 docs/.vitepress/cache/

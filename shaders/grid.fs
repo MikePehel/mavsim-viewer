@@ -18,6 +18,15 @@ uniform sampler2D groundTex;
 uniform vec4 colTint;
 uniform vec3 camPos;
 
+/*
+ * Scales the contribution of every grid LINE (minor, major, axes) into
+ * the final composite. 1.0 = full-strength lines (default); 0.25 lets
+ * the ground colour read through at 75 % so the lines appear "dimmed"
+ * without losing the ground colour. Used to fade the grid under the
+ * toon-shaded terrain.
+ */
+uniform float lineAlphaMul;
+
 out vec4 finalColor;
 
 // Hash helpers
@@ -121,10 +130,10 @@ void main() {
 
     // Compose: ground -> minor -> major -> axes
     vec4 color = ground;
-    color = mix(color, colMinor, lineMinor * colMinor.a);
-    color = mix(color, colMajor, lineMajor * colMajor.a);
-    color = mix(color, colAxisX, axisXLine * colAxisX.a);
-    color = mix(color, colAxisZ, axisZLine * colAxisZ.a);
+    color = mix(color, colMinor, lineMinor * colMinor.a * lineAlphaMul);
+    color = mix(color, colMajor, lineMajor * colMajor.a * lineAlphaMul);
+    color = mix(color, colAxisX, axisXLine * colAxisX.a * lineAlphaMul);
+    color = mix(color, colAxisZ, axisZLine * colAxisZ.a * lineAlphaMul);
 
     // Distance fade — prevent aliasing at horizon
     float fade = 1.0 - smoothstep(600.0, 1200.0, dist);

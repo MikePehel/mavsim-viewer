@@ -47,6 +47,9 @@
 #include "ortho_panel.h"
 #include "theme.h"
 #include "asset_path.h"
+#include "terrain/terrain_params.h"
+#include "terrain/terrain_renderer.h"
+#include "ulog/terrain_params_extract.h"
 #include "replay_trail.h"
 #include "replay_markers.h"
 #include "replay_conflict.h"
@@ -1392,6 +1395,19 @@ int hawkeye_init(const char *canvas_id, int width, int height) {
 
     emscripten_set_element_css_size(canvas_id, (double)width, (double)height);
 
+    /*
+     * Fan terrain parameter applies out to the renderer's local cache.
+     * Mirrors src/main.c after-InitWindow registration: the WASM-side
+     * ULog ingestion (when it grows a SIH_TERR_* extraction path) calls
+     * hawkeye_terrain_apply_params(); registering the renderer's apply
+     * here once means the renderer stays in sync without the ingestion
+     * site needing a direct dependency on the renderer. The defensive
+     * pre-init safety in terrain_renderer_apply_params (ef8246c) means
+     * apply calls that fire before scene_init's terrain_renderer_init
+     * are correctly cached and survive the init.
+     */
+    hawkeye_terrain_set_apply_callback(terrain_renderer_apply_params);
+
     scene_init(&g.scene);
     log_heap("init:after_scene_init");
     theme_registry_init(&g.scene.theme_reg);
@@ -1506,6 +1522,26 @@ int hawkeye_stage_ulog(int index, const uint8_t *buf, size_t len) {
     printf("hawkeye_stage_ulog[%d]: %zu bytes, %d att, %d lpos\n",
            index, len, tl->att_count, tl->lpos_count);
     log_heap("stage_ulog:after_extract");
+
+    /*
+     * Mirror src/data_source_ulog.c's terrain ingestion on the WASM
+     * byte-loading path. Non-SIH logs return false and fall through to
+     * defaults so the shared terrain library is in a known flat
+     * baseline regardless of what was staged previously; SIH logs flip
+     * enabled=true and push the full SIH_TERR_* set through the apply
+     * callback (registered after InitWindow above) into the renderer's
+     * cache. Only fires for index 0 because the terrain renderer is a
+     * single shared instance — stomping the params with each subsequent
+     * stage would lose the first log's state when multiple sources are
+     * loaded.
+     */
+    if (index == 0) {
+        HawkeyeTerrainParams terr;
+        if (!ulog_extract_terrain_params_from_buffer(buf, len, &terr)) {
+            terr = hawkeye_terrain_params_default();
+        }
+        hawkeye_terrain_apply_params(&terr);
+    }
     return 0;
 }
 
