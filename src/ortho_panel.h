@@ -20,7 +20,8 @@ void ortho_panel_init(ortho_panel_t *op);
 void ortho_panel_update(ortho_panel_t *op, Vector3 vehicle_pos);
 void ortho_panel_render(ortho_panel_t *op, const vehicle_t *vehicles,
                         int vehicle_count, int selected, const theme_t *theme,
-                        int corr_mode, const int *pinned, int pinned_count);
+                        int corr_mode, const int *pinned, int pinned_count,
+                        const int *curtain_baseline);
 void ortho_panel_draw(const ortho_panel_t *op, int screen_h, int hud_bar_h,
                       const theme_t *theme, Font font,
                       const vehicle_t *vehicles, int vehicle_count,

@@ -249,7 +249,8 @@ void ortho_panel_update(ortho_panel_t *op, Vector3 pos) {
 
 void ortho_panel_render(ortho_panel_t *op, const vehicle_t *vehicles,
                         int vehicle_count, int selected, const theme_t *theme,
-                        int corr_mode, const int *pinned, int pinned_count)
+                        int corr_mode, const int *pinned, int pinned_count,
+                        const int *curtain_baseline)
 {
     Color bg_col = theme->sky;
 
@@ -273,6 +274,8 @@ void ortho_panel_render(ortho_panel_t *op, const vehicle_t *vehicles,
                             && pidx != selected) {
                             vehicle_draw_correlation_curtain(
                                 &vehicles[selected], &vehicles[pidx],
+                                curtain_baseline ? curtain_baseline[selected] : 0,
+                                curtain_baseline ? curtain_baseline[pidx]     : 0,
                                 theme, op->cameras[v].position);
                         }
                     }
