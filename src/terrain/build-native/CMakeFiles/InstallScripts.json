@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/m/Developer/MikePehel/mavsim-viewer/Hawkeye/src/terrain/build-native/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

@@ -1,0 +1,1 @@
+/usr/bin/cc  -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names "CMakeFiles/determinism_test.dir/Users/m/Developer/MikePehel/mavsim-viewer/Hawkeye/tests/terrain/determinism_test.c.o" -o determinism_test  libhawkeye-terrain.a

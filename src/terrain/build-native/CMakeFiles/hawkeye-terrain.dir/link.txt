@@ -1,0 +1,2 @@
+/usr/bin/ar qc libhawkeye-terrain.a "CMakeFiles/hawkeye-terrain.dir/terrain.c.o" "CMakeFiles/hawkeye-terrain.dir/Users/m/Developer/MikePehel/mavsim-viewer/Hawkeye/src/terrain_sdf/terrain_sdf.c.o" "CMakeFiles/hawkeye-terrain.dir/Users/m/Developer/MikePehel/mavsim-viewer/Hawkeye/src/terrain_sdf/scene.c.o"
+/usr/bin/ranlib libhawkeye-terrain.a

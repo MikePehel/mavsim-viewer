@@ -527,10 +527,17 @@ void vehicle_update(vehicle_t *v, const hil_state_t *state, const home_position_
         if (home && home->valid && (lat != 0.0 || lon != 0.0)) {
             v->lat0 = lat;
             v->lon0 = lon;
-            v->alt0 = alt;
+            // Use HOME_POSITION's altitude as the ground reference, NOT the
+            // drone's current altitude — otherwise reconnecting to a vehicle
+            // that's already airborne snapshots the in-air altitude as
+            // "ground", and altitude_rel reads negative after landing.
+            // HOME_POSITION.altitude is mm MSL per MAVLink spec.
+            v->alt0 = (double)home->alt * 1e-3;
             v->origin_set = true;
 
         } else if (v->origin_wait_count > 20) {
+            // Fallback: HOME_POSITION never arrived. Current alt is the only
+            // signal we have — accept the off-by-N if the drone is airborne.
             v->lat0 = lat;
             v->lon0 = lon;
             v->alt0 = alt;
