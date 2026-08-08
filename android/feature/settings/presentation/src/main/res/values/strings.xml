@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_theme_header">Theme</string>
+    <string name="settings_units_header">Units</string>
+    <string name="settings_theme_system">System</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_unit_metric">Metric</string>
+    <string name="settings_unit_imperial">Imperial</string>
+    <string name="settings_connection_header">Connection</string>
+    <string name="settings_listen_port_label">MAVLink listen port</string>
+    <string name="settings_port_error_number">Enter a number.</string>
+    <string name="settings_port_error_range">Enter a port between 1024 and 65535.</string>
+</resources>

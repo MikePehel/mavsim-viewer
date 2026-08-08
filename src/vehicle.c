@@ -97,18 +97,25 @@ static int parse_mtl_names(const char *obj_path, mtl_entry_t *entries, int max_e
         return 0;
     }
 
-    FILE *fp = fopen(mtl_path, "r");
-    if (!fp) return 0;
+    // LoadFileText routes through SetLoadFileTextCallback on Android (AAssetManager),
+    // so this works both on desktop (direct file read) and inside an APK.
+    char *text = LoadFileText(mtl_path);
+    if (!text) return 0;
 
     int count = 0;
     char current_name[64] = {0};
     char line[256];
+    const char *p = text;
 
-    while (fgets(line, sizeof(line), fp) && count < max_entries) {
-        // Strip newline
-        int ll = (int)strlen(line);
-        while (ll > 0 && (line[ll-1] == '\n' || line[ll-1] == '\r'))
-            line[--ll] = '\0';
+    while (*p && count < max_entries) {
+        // Collect one line
+        int ll = 0;
+        while (*p && *p != '\n' && ll < (int)sizeof(line) - 1)
+            line[ll++] = *p++;
+        if (*p == '\n') p++;
+        while (ll > 0 && (line[ll-1] == '\r' || line[ll-1] == ' '))
+            ll--;
+        line[ll] = '\0';
 
         if (strncmp(line, "newmtl ", 7) == 0) {
             snprintf(current_name, sizeof(current_name), "%s", line + 7);
@@ -130,7 +137,7 @@ static int parse_mtl_names(const char *obj_path, mtl_entry_t *entries, int max_e
         }
     }
 
-    fclose(fp);
+    UnloadFileText(text);
     return count;
 }
 
@@ -525,9 +532,12 @@ void vehicle_update(vehicle_t *v, const hil_state_t *state, const home_position_
         // Fall back to current altitude after ~1 second (20 HIL updates at 22Hz).
         v->origin_wait_count++;
         if (home && home->valid && (lat != 0.0 || lon != 0.0)) {
-            v->lat0 = lat;
-            v->lon0 = lon;
-            v->alt0 = alt;
+            // Latch the origin to HOME (the takeoff/ground point), not the current
+            // sample. Otherwise reconnecting to a live session mid-flight latches the
+            // airborne position as the origin and the vehicle renders on the floor.
+            v->lat0 = home->lat * 1e-7 * (M_PI / 180.0);
+            v->lon0 = home->lon * 1e-7 * (M_PI / 180.0);
+            v->alt0 = home->alt * 1e-3;
             v->origin_set = true;
 
         } else if (v->origin_wait_count > 20) {
@@ -546,7 +556,12 @@ void vehicle_update(vehicle_t *v, const hil_state_t *state, const home_position_
     // Local NED position relative to origin
     double jmav_x = EARTH_RADIUS * (lat - v->lat0);                // North
     double jmav_y = EARTH_RADIUS * (lon - v->lon0) * cos(v->lat0); // East
-    double jmav_z = alt - v->alt0;                                   // Up
+    // Prefer telemetry's "above home" altitude when present (GLOBAL_POSITION_INT). It is
+    // correct regardless of the latched origin, so reconnecting mid-flight no longer renders
+    // the vehicle on the floor. HIL (no relative_alt) falls back to MSL minus the origin.
+    double jmav_z = state->relative_alt_valid
+        ? state->relative_alt * 1e-3
+        : alt - v->alt0;                                             // Up
 
     // NED frame → Raylib (X=right, Y=up, Z=back) + grid deconfliction offset
     v->position.x = (float)jmav_y + v->grid_offset.x;
@@ -586,7 +601,9 @@ void vehicle_update(vehicle_t *v, const hil_state_t *state, const home_position_
                             (float)state->vy * state->vy) * 0.01f;
     v->vertical_speed = -state->vz * 0.01f;
     v->airspeed = state->ind_airspeed * 0.01f;
-    v->altitude_rel = (float)(alt - v->alt0);
+    v->altitude_rel = (float)(state->relative_alt_valid
+        ? state->relative_alt * 1e-3
+        : alt - v->alt0);
 
     // Adaptive trail sampling: record a point when direction changes (tight turns
     // get dense coverage) or after a max distance on straight runs (so they don't

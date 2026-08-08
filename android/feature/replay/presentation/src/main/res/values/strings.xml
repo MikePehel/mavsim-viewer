@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="replay_library_title">Replay library</string>
+    <string name="replay_back">Back</string>
+    <string name="replay_open_file">Open file</string>
+
+    <string name="replay_empty_title">No logs yet</string>
+    <string name="replay_empty_message">Import a .ulg flight log to replay it. Logs you import are kept here.</string>
+
+    <!-- Row caption: size and import date. Two placeholders so translators can reorder. -->
+    <string name="replay_entry_meta">%1$s · %2$s</string>
+
+    <plurals name="replay_delete_title">
+        <item quantity="one">Delete %1$d log?</item>
+        <item quantity="other">Delete %1$d logs?</item>
+    </plurals>
+    <string name="replay_delete_message">This can\'t be undone.</string>
+    <string name="replay_delete_confirm">Delete</string>
+    <string name="replay_delete_cancel">Cancel</string>
+    <string name="replay_delete_selected">Delete selected</string>
+
+    <string name="replay_select">Select</string>
+    <string name="replay_exit_selection">Exit selection</string>
+    <string name="replay_selection_title">%1$d selected</string>
+    <string name="replay_play_together">Play together (%1$d)</string>
+    <string name="replay_selection_cap">You can select up to 16 logs at a time</string>
+</resources>

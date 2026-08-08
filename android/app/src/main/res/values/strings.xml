@@ -1,3 +1,41 @@
 <resources>
     <string name="app_name">Hawkeye Android</string>
+
+    <!-- Navigation suite -->
+    <string name="shell_nav_home">Home</string>
+    <string name="shell_nav_settings">Settings</string>
+
+    <!-- Replay transport overlay -->
+    <string name="transport_play">Play</string>
+    <string name="transport_pause">Pause</string>
+
+    <!-- Live status overlay -->
+    <string name="live_status_waiting">Waiting for MAVLink on %1$s</string>
+    <string name="live_status_connected">Connected — sysid %1$d</string>
+    <string name="live_status_lost">Connection lost</string>
+
+    <!-- Swarm drone-selection wheel overlay -->
+    <string name="swarm_wheel_hint">Release to switch</string>
+    <!-- Slice label; the number matches the renderer's drone indicators (1-based). -->
+    <string name="swarm_drone_label">Drone %1$d</string>
+
+    <!-- Root wheel: top-level branch slice labels (kept short to fit along the ring) -->
+    <string name="wheel_views">Views</string>
+    <string name="wheel_drones">Drones</string>
+    <!-- Fuller phrases echoed in the wheel hub while a branch is hovered -->
+    <string name="wheel_change_view">Change View</string>
+    <string name="wheel_select_drone">Select Drone</string>
+    <!-- Change View submenu: perspective cameras -->
+    <string name="wheel_view_chase">Chase</string>
+    <string name="wheel_view_fpv">FPV</string>
+    <string name="wheel_view_free">Free</string>
+    <!-- Change View submenu: orthographic views -->
+    <string name="wheel_view_top">Top</string>
+    <string name="wheel_view_bottom">Bottom</string>
+    <string name="wheel_view_front">Front</string>
+    <string name="wheel_view_back">Back</string>
+    <string name="wheel_view_left">Left</string>
+    <string name="wheel_view_right">Right</string>
+    <!-- Change View submenu: 3-up ortho side panel toggle -->
+    <string name="wheel_view_panel">Panel</string>
 </resources>

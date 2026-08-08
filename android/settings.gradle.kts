@@ -1,4 +1,5 @@
 pluginManagement {
+    includeBuild("build-logic")
     repositories {
         google {
             content {
@@ -24,3 +25,16 @@ dependencyResolutionManagement {
 
 rootProject.name = "Hawkeye Android"
 include(":app")
+include(":core:domain")
+include(":core:presentation")
+include(":core:design-system")
+include(":feature:replay:data")
+include(":feature:replay:presentation")
+include(":core:navigation")
+include(":feature:settings:domain")
+include(":feature:settings:data")
+include(":feature:settings:presentation")
+include(":feature:home:presentation")
+include(":feature:live:domain")
+include(":feature:live:data")
+include(":feature:live:presentation")

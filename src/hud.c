@@ -27,6 +27,8 @@
 void hud_init(hud_t *h) {
     memset(h, 0, sizeof(*h));
     h->show_help = false;
+    h->show_transport = true;  // platforms that draw their own transport (Android) opt out
+    h->scale_mul = 1.0f;
     for (int i = 0; i < HUD_MAX_PINNED; i++)
         h->pinned[i] = -1;
 
@@ -328,6 +330,7 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
     // Scale factor: 1.0 at 720p, ~1.33 at 1080p, ~1.6 at 1440p
     float s = powf(screen_h / 720.0f, 0.7f);
     if (s < 1.0f) s = 1.0f;
+    if (h->scale_mul > 0.0f) s *= h->scale_mul;
 
     // Scaled font sizes
     float fs_label = fmaxf(16 * s, 10.0f);
@@ -341,7 +344,8 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
     int primary_h = (int)(120 * s);
     int secondary_h = (int)(38 * s);
     bool is_replay_source = sources[selected].playback.duration_s > 0.0f;
-    int transport_h = is_replay_source ? (int)(28 * s) : 0;
+    bool show_transport = is_replay_source && h->show_transport;
+    int transport_h = show_transport ? (int)(28 * s) : 0;
     int total_bar_h = transport_h + primary_h + (h->pinned_count > 0 ? h->pinned_count * secondary_h + (int)(4 * s) : 0);
     int bar_y = screen_h - total_bar_h;
 
@@ -451,7 +455,7 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
     }
 
     // Replay transport row (above the main HUD bar)
-    if (is_replay_source) {
+    if (show_transport) {
         hud_draw_transport(h, &sources[selected].playback,
                            sources[selected].connected, &vehicles[selected],
                            markers_all, sys_markers_all,
@@ -590,9 +594,10 @@ void hud_draw(const hud_t *h, const vehicle_t *vehicles,
 int hud_bar_height(const hud_t *h, int screen_h) {
     float s = powf(screen_h / 720.0f, 0.7f);
     if (s < 1.0f) s = 1.0f;
+    if (h->scale_mul > 0.0f) s *= h->scale_mul;
     int primary_h = (int)(120 * s);
     int secondary_h = (int)(38 * s);
-    int transport_h = h->is_replay ? (int)(28 * s) : 0;
+    int transport_h = (h->is_replay && h->show_transport) ? (int)(28 * s) : 0;
     return transport_h + primary_h + (h->pinned_count > 0 ? h->pinned_count * secondary_h + (int)(4 * s) : 0);
 }
 

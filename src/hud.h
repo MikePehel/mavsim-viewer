@@ -38,9 +38,15 @@ typedef struct {
     int pinned_count;
     bool show_help;
     bool is_replay;     // true when data source is ULog replay (affects layout)
+    bool show_transport; // false hides the transport sub-bar (Android drives transport from a Compose overlay)
     bool show_yaw;      // Y key: swap HDG for YAW display
     Font font_value;    // JetBrains Mono for telemetry numbers
     Font font_label;    // Inter for labels and status text
+
+    // Extra multiplier on top of the screen-height-derived scale. 1.0 on
+    // desktop/WASM; mobile bumps this so labels/values meet M3 readability
+    // floors at typical phone hold distance.
+    float scale_mul;
 
     // Toast notification (fades in/out above timeline)
     char toast_text[64];
