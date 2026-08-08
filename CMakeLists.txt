@@ -102,6 +102,13 @@ if(NOT BUILD_TESTING_ONLY)
     target_compile_definitions(hawkeye PRIVATE
         HAWKEYE_INSTALL_DATADIR="${CMAKE_INSTALL_FULL_DATADIR}/hawkeye")
 
+    # Release CI passes -DHAWKEYE_VERSION=x.y.z; local builds report "dev"
+    # via the fallback in main.c.
+    if(DEFINED HAWKEYE_VERSION)
+        target_compile_definitions(hawkeye PRIVATE
+            HAWKEYE_VERSION="${HAWKEYE_VERSION}")
+    endif()
+
     install(TARGETS hawkeye RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     install(DIRECTORY models/ DESTINATION ${CMAKE_INSTALL_DATADIR}/hawkeye/models
             FILES_MATCHING PATTERN "*.obj" PATTERN "*.mtl" PATTERN "*.glb")

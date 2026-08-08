@@ -32,6 +32,11 @@
 #define MAX_VEHICLES 16
 #define EARTH_RADIUS 6371000.0
 
+/* Release builds get -DHAWKEYE_VERSION from CMake; local builds are "dev". */
+#ifndef HAWKEYE_VERSION
+#define HAWKEYE_VERSION "dev"
+#endif
+
 #include "correlation.h"
 
 #define CHORD_TIMEOUT_S 0.3
@@ -48,6 +53,8 @@ static void print_usage(const char *prog) {
     printf("  --ghost <file1.ulg> [file2.ulg ...]   Ghost mode replay\n");
     printf("  -w <width>     Window width (default: 1280)\n");
     printf("  -h <height>    Window height (default: 720)\n");
+    printf("  --version      Print version and exit\n");
+    printf("  --help         Print this message and exit\n");
 }
 
 /* Thin wrapper: delegates to the testable inline in ui_logic.h */
@@ -201,9 +208,22 @@ int main(int argc, char *argv[]) {
                 }
                 replay_paths[num_replay_files++] = argv[++i];
             }
+        } else if (strcmp(argv[i], "--version") == 0) {
+            printf("hawkeye %s\n", HAWKEYE_VERSION);
+            return 0;
         } else if (strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return 0;
+        } else {
+            /* Reject rather than ignore: an unmatched argument used to fall
+             * through silently and launch the live-MAVLink viewer, so a typo
+             * (or `hawkeye flight.ulg` without --replay) looked like a hang.
+             * Options that take a value also land here when the value is
+             * missing, hence the wording. */
+            fprintf(stderr, "hawkeye: unrecognized or incomplete option '%s'\n",
+                    argv[i]);
+            print_usage(argv[0]);
+            return 1;
         }
     }
 
