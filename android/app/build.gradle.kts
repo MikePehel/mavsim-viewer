@@ -8,24 +8,18 @@ plugins {
 val hawkeyeVersionName: String =
     providers.gradleProperty("hawkeyeVersionName").getOrElse("0.0.0-dev")
 
-// Monotonic code derived from the semver: 0.4.0 -> 4000, 1.2.3 -> 1002003.
-//
-// Parsed strictly. A malformed version has to fail the build rather than degrade to a
-// low code, because Android refuses any upgrade whose version code is not greater than
-// the installed one, and a silently-wrong code would ship in a release.
-val hawkeyeVersionCode: Int = run {
-    val parts = hawkeyeVersionName.substringBefore('-').split('.')
-    require(parts.size == 3) {
-        "hawkeyeVersionName must be MAJOR.MINOR.PATCH with an optional -suffix, got '$hawkeyeVersionName'"
-    }
-    val (major, minor, patch) = parts.map { part ->
-        part.toIntOrNull()?.takeIf { it in 0..999 }
-            ?: error("hawkeyeVersionName component '$part' is not an integer in 0..999, from '$hawkeyeVersionName'")
-    }
-    // The 1000 radix leaves room for two-digit and three-digit minor/patch numbers.
-    // 0.0.0 is only reachable via the dev fallback above, which needs a floor of 1.
-    (major * 1_000_000 + minor * 1_000 + patch).coerceAtLeast(1)
-}
+// Monotonic code derived from the semver: 0.4.0-rc1 -> 400001, 0.4.0 -> 400099. The
+// derivation and its rules live in build-logic (VersionCode.kt) behind a unit test,
+// because a silently wrong code would brick upgrades and ship in a release.
+val hawkeyeVersionCode: Int = com.px4.hawkeye.buildlogic.hawkeyeVersionCode(hawkeyeVersionName)
+
+// Release signing activates only when the environment provides an upload keystore
+// (HAWKEYE_UPLOAD_KEYSTORE is a path to a decoded .jks). CI injects it from repository
+// secrets; local and PR builds have none and keep producing an unsigned release APK.
+// Blank counts as absent because a workflow env mapping of an unset secret yields an
+// empty string, and that case has to stay on the unsigned path.
+val uploadKeystorePath: String? = providers.environmentVariable("HAWKEYE_UPLOAD_KEYSTORE")
+    .orNull?.takeIf { it.isNotBlank() }
 
 android {
     namespace = "com.px4.hawkeye.android"
@@ -54,16 +48,42 @@ android {
 
         externalNativeBuild {
             cmake {
-                // Changing this list means updating android/scripts/verify-release-apk.sh
-                // and the ABI list documented in docs/installation.md,
-                // docs/developer/releasing.md, docs/troubleshooting.md, and README.md.
+                // Changing this list means updating android/scripts/verify-release-apk.sh,
+                // android/scripts/verify-release-bundle.sh, and the ABI list documented
+                // in docs/installation.md, docs/developer/releasing.md,
+                // docs/troubleshooting.md, and README.md.
                 abiFilters += listOf("arm64-v8a", "x86_64")
+            }
+        }
+    }
+
+    signingConfigs {
+        if (uploadKeystorePath != null) {
+            val password = providers.environmentVariable("HAWKEYE_UPLOAD_KEYSTORE_PASSWORD").orNull
+            val alias = providers.environmentVariable("HAWKEYE_UPLOAD_KEY_ALIAS").orNull
+            // Checked here rather than left to .get() so a half-configured environment
+            // fails at configuration time with the trio contract spelled out, not deep
+            // in :app:packageRelease. isNullOrEmpty, not isPresent: an env mapping of an
+            // unset secret arrives as an empty string.
+            require(!password.isNullOrEmpty() && !alias.isNullOrEmpty()) {
+                "HAWKEYE_UPLOAD_KEYSTORE is set, so HAWKEYE_UPLOAD_KEYSTORE_PASSWORD and " +
+                    "HAWKEYE_UPLOAD_KEY_ALIAS must be set too"
+            }
+            create("upload") {
+                storeFile = file(uploadKeystorePath)
+                storePassword = password
+                keyAlias = alias
+                // The upload keystore is PKCS12, which has a single password.
+                keyPassword = password
             }
         }
     }
 
     buildTypes {
         release {
+            if (uploadKeystorePath != null) {
+                signingConfig = signingConfigs.getByName("upload")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
